@@ -1,0 +1,20 @@
+[submodule "vendor/rtl_433"]
+    path = vendor/rtl_433
+    url = https://github.com/merbanan/rtl_433.git
+    branch = master
+[submodule "vendor/weewx-sdr"]
+    path = vendor/weewx-sdr
+    url = https://github.com/matthewwall/weewx-sdr.git
+    branch = master
+[submodule "vendor/weewx-belchertown-new"]
+    path = vendor/weewx-belchertown-new
+    url = https://github.com/uajqq/weewx-belchertown-new.git
+    branch = master
+[submodule "vendor/weewx-docker"]
+    path = vendor/weewx-docker
+    url = https://github.com/felddy/weewx-docker.git
+    branch = develop
+[submodule "vendor/rtl_433_docker"]
+    path = vendor/rtl_433_docker
+    url = https://github.com/hertzg/rtl_433_docker.git
+    branch = master
