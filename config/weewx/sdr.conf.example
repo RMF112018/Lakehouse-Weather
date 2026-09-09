@@ -1,0 +1,29 @@
+# Merge this section into runtime/weewx/weewx.conf after Gate 1.
+# Exact packet field names and sensor IDs must be confirmed from captured output.
+
+[SDR]
+    driver = user.sdr
+    cmd = rtl_433 -f 915M -M utc -M protocol -F json
+    log_lines = False
+    log_unknown_sensors = True
+    log_unmapped_sensors = True
+
+    [[sensor_map]]
+        # Replace <WH65B_ID> with the observed sensor ID.
+        outTemp = temperature.<WH65B_ID>.FOWH65BPacket
+        outHumidity = humidity.<WH65B_ID>.FOWH65BPacket
+        windDir = wind_dir.<WH65B_ID>.FOWH65BPacket
+        windSpeed = wind_speed.<WH65B_ID>.FOWH65BPacket
+        windGust = wind_gust.<WH65B_ID>.FOWH65BPacket
+        rain_total = rain_total.<WH65B_ID>.FOWH65BPacket
+        UV = uv.<WH65B_ID>.FOWH65BPacket
+        radiation = radiation.<WH65B_ID>.FOWH65BPacket
+        outBatteryStatus = battery.<WH65B_ID>.FOWH65BPacket
+
+        # Optional WH32B indoor sensor; populate only if detected.
+        # inTemp = temperature.<WH32B_ID>.<PACKET_CLASS>
+        # inHumidity = humidity.<WH32B_ID>.<PACKET_CLASS>
+        # pressure = pressure.<WH32B_ID>.<PACKET_CLASS>
+
+    [[deltas]]
+        rain = rain_total

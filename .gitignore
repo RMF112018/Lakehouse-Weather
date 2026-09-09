@@ -1,1 +1,21 @@
-# publication-in-progress marker
+.env
+.DS_Store
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.tmp
+*.swp
+__pycache__/
+.pytest_cache/
+
+runtime/weewx/*
+!runtime/weewx/.gitkeep
+runtime/backups/*
+!runtime/backups/.gitkeep
+runtime/logs/*
+!runtime/logs/.gitkeep
+
+# Captures may contain large IQ or RF files.
+captures/

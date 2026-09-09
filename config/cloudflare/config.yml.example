@@ -1,0 +1,9 @@
+# Optional named-tunnel configuration if token-based operation is not used.
+# Keep credentials outside Git.
+tunnel: <TUNNEL-UUID>
+credentials-file: /run/secrets/cloudflared-credentials.json
+
+ingress:
+  - hostname: weather.example.com
+    service: http://web:80
+  - service: http_status:404

@@ -1,0 +1,60 @@
+name: lakehouse-weather
+
+services:
+  weewx:
+    build:
+      context: .
+      dockerfile: docker/weewx/Dockerfile
+      args:
+        RTL433_REF: ${RTL433_REF:-3792adf1075acb7c6447f7c27df9920fd4f2d41a}
+    image: lakehouse-weather/weewx-sdr:local
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/New_York}
+    devices:
+      # Synology/Container Manager must expose this path. Gate 1 proves that first.
+      - /dev/bus/usb:/dev/bus/usb
+    volumes:
+      - ./runtime/weewx:/data
+      - ./:/workspace:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f weewxd >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      weewx:
+        condition: service_started
+    ports:
+      - "${HTTP_PORT:-8088}:80"
+    volumes:
+      - ./runtime/weewx/public_html:/usr/share/nginx/html:ro
+      - ./config/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["realtime"]
+    restart: unless-stopped
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./runtime/mosquitto/data:/mosquitto/data
+      - ./runtime/mosquitto/log:/mosquitto/log
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["remote"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_started
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

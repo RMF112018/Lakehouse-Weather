@@ -1,0 +1,15 @@
+{
+  "time": "2026-09-09 20:00:00",
+  "model": "Fineoffset-WH65B",
+  "id": 111,
+  "battery_ok": 1,
+  "temperature_C": 29.5,
+  "humidity": 52,
+  "wind_dir_deg": 157,
+  "wind_avg_m_s": 0.191,
+  "wind_max_m_s": 0.510,
+  "rain_mm": 3091.180,
+  "uvi": 4,
+  "light_lux": 57519,
+  "mic": "CRC"
+}
