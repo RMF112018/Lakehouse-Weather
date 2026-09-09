@@ -1,0 +1,22 @@
+# Lakehouse Weather upstream pins
+# Refreshed: 2026-09-09
+
+rtl_433.url=https://github.com/merbanan/rtl_433.git
+rtl_433.ref=master
+rtl_433.commit=3792adf1075acb7c6447f7c27df9920fd4f2d41a
+
+weewx-sdr.url=https://github.com/matthewwall/weewx-sdr.git
+weewx-sdr.ref=master
+weewx-sdr.commit=e5f1f9915322fa6d1c25b4ff8e490b804cefeac1
+
+weewx-belchertown-new.url=https://github.com/uajqq/weewx-belchertown-new.git
+weewx-belchertown-new.ref=master
+weewx-belchertown-new.commit=e3994950c6dd95a0bcc4f101f4ea087f3fc31a5c
+
+weewx-docker.url=https://github.com/felddy/weewx-docker.git
+weewx-docker.ref=develop
+weewx-docker.commit=000186c66d1331c135f49bfd6fa28253464eefbf
+
+rtl_433_docker.url=https://github.com/hertzg/rtl_433_docker.git
+rtl_433_docker.ref=master
+rtl_433_docker.commit=a3e2527a8bad99a794df5a3628c843497c3c16de
