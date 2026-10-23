@@ -62,8 +62,9 @@ def authenticate():
     expected = {tuple(['-A', CHAIN] + rule) for rule in rules()}
     # The NAS lacks xt_comment. Ownership is the complete exact rule tuple,
     # including this exclusive bridge, source /32 and WAN interface.
+    owned = ownership()
     baseline = ''.join(line + '\n' for line in policy.splitlines()
-                       if tuple(shlex.split(line)) not in expected)
+                       if not owned or tuple(shlex.split(line)) not in expected)
     if hashlib.sha256(baseline.encode()).hexdigest() != '545cbe27225a6bd1571b5e5436e153fd68ab63648e265fe7898251646f6b589a':
         raise RuntimeError('Firewall baseline drift; operator review required')
     if '-j DROP' not in policy:
@@ -75,9 +76,36 @@ def rules():
              '--dport', port, '-j', 'RETURN'] for protocol, port in [('tcp', '443'), ('udp', '53'), ('tcp', '53')]]
 
 
+def ownership(create=False):
+    path = ROOT / 'egress-ownership.json'
+    expected = {'network': NETWORK, 'container': CONTAINER, 'rules': rules()}
+    if path.exists() or path.is_symlink():
+        secure_path(path, file=True)
+        if json.loads(path.read_text()) != expected:
+            raise RuntimeError('Weather ownership receipt drift')
+        return True
+    if create:
+        # authenticate() already proved the unmodified baseline. Never adopt
+        # a preexisting identical tuple without this ownership receipt.
+        for rule in rules():
+            result = run([IPTABLES, '-C', CHAIN] + rule, check=False)
+            if result.returncode != 1:
+                raise RuntimeError('Preexisting tuple or rule capability collision')
+        with path.open('x') as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(expected, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return True
+    return False
+
+
 def reconcile(remove=False):
     if os.geteuid() != 0:
         raise RuntimeError('Root required')
+    if remove and not ownership():
+        print('No owned weather forwarding rules to remove')
+        return
     if not remove:
         try:
             authenticate()
@@ -86,6 +114,7 @@ def reconcile(remove=False):
             # Never retain stale authority merely because admission now fails.
             reconcile(remove=True)
             raise
+        ownership(create=True)
     changed = 0
     for rule in rules():
         present = run([IPTABLES, '-C', CHAIN] + rule, check=False).returncode == 0
