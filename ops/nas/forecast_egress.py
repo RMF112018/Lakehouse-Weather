@@ -22,6 +22,7 @@ BRIDGE = 'docker-452efc88'
 SOURCE = '172.28.0.2/32'
 WAN = 'ovs_eth0'
 MARKER = 'weather-forecast-egress-v1'
+BASELINE_SHA = '545cbe27225a6bd1571b5e5436e153fd68ab63648e265fe7898251646f6b589a'
 ROOT = Path('/volume1/weather-dashboard/operations')
 DEPLOYED = ROOT / 'forecast_egress.py'
 CRON = Path('/etc/cron.d/weather-forecast-egress')
@@ -59,16 +60,27 @@ def authenticate():
     if 'dev' not in route or route[route.index('dev') + 1] != WAN:
         raise RuntimeError('WAN interface drift')
     policy = run([IPTABLES, '-S', CHAIN]).stdout
-    expected = {tuple(['-A', CHAIN] + rule) for rule in rules()}
+    expected = {fingerprint(['-A', CHAIN] + rule) for rule in rules()}
     # The NAS lacks xt_comment. Ownership is the complete exact rule tuple,
     # including this exclusive bridge, source /32 and WAN interface.
     owned = ownership()
     baseline = ''.join(line + '\n' for line in policy.splitlines()
-                       if not owned or tuple(shlex.split(line)) not in expected)
-    if hashlib.sha256(baseline.encode()).hexdigest() != '545cbe27225a6bd1571b5e5436e153fd68ab63648e265fe7898251646f6b589a':
+                       if not owned or fingerprint(shlex.split(line)) not in expected)
+    if hashlib.sha256(baseline.encode()).hexdigest() != BASELINE_SHA:
         raise RuntimeError('Firewall baseline drift; operator review required')
     if '-j DROP' not in policy:
         raise RuntimeError('Expected deny-by-default firewall absent')
+
+
+def fingerprint(tokens):
+    # iptables -S reorders source/interface options. Compare exact, unique
+    # option/value fields instead of byte order; never ignore extra fields.
+    if tokens[:2] != ['-A', CHAIN] or len(tokens[2:]) % 2:
+        return None
+    pairs = list(zip(tokens[2::2], tokens[3::2]))
+    if len({key for key, _ in pairs}) != len(pairs):
+        return None
+    return frozenset(pairs)
 
 
 def rules():
