@@ -1,9 +1,11 @@
 """NAS contracts verified without connecting to Docker or reading secrets."""
 import contextlib
+import ast
 import importlib.util
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
@@ -29,17 +31,43 @@ prepare = load('prepare_runtime')
 class NASContracts(unittest.TestCase):
     def test_compose_additive_hardened(self):
         text = (ROOT / 'compose.dashboard.production.yaml').read_text()
-        for required in ['platform: linux/amd64', 'pull_policy: never', 'user: "10001:10001"', 'read_only: true', 'cap_drop: [ALL]', 'no-new-privileges:true', 'restart: unless-stopped', 'mem_limit: 256m', 'pids_limit: 64', 'WEATHER_ALLOW_DATABASE: production', 'WEATHER_DATABASE_URL_FILE:', 'WEATHER_INGEST_TOKEN_FILE:', '/api/health', '/api/ready']:
+        for required in ['platform: linux/amd64', 'pull_policy: never', 'user: "10001:10001"', 'read_only: true', 'cap_drop: [ALL]', 'no-new-privileges:true', 'restart: unless-stopped', 'mem_limit: 256m', 'pids_limit: 64', 'WEATHER_ALLOW_DATABASE: production', 'WEATHER_DATABASE_URL_FILE:', 'WEATHER_INGEST_TOKEN_FILE:', 'PostgresStore', 'check_ready()']:
             self.assertIn(required, text)
         self.assertEqual(text.count('external: true'), 2)
         dashboard, forecast = text.split('  forecast:', 1)
         self.assertNotIn('command:', dashboard)
         self.assertNotIn('ingest-token', forecast)
+        self.assertIn('WEATHER_AUTH_ORIGIN: https://www.bobby-fetting.me', dashboard)
+        self.assertNotIn('WEATHER_AUTH_ORIGIN', forecast)
         self.assertNotIn('WEATHER_DATABASE_URL_PATH', forecast)
         self.assertIn('WEATHER_FORECAST_DATABASE_URL_PATH', forecast)
         self.assertIn('condition: service_healthy', forecast)
         for forbidden in ['ports:', 'build:', 'docker.sock', 'postgres:']:
             self.assertNotIn(forbidden, text)
+
+
+    def test_private_health_probe_without_password_or_http_and_redacted_failure(self):
+        from weather import __main__ as cli
+        from weather import store
+        text = (ROOT / 'compose.dashboard.production.yaml').read_text().split('  forecast:', 1)[0]
+        line = next(line for line in text.splitlines() if line.strip().startswith('test:'))
+        command = ast.literal_eval(line.split('test: ', 1)[1])
+        code = command[-1]
+        self.assertEqual(command[:3], ['CMD', 'python', '-c'])
+        self.assertNotIn('urllib', code)
+        self.assertNotIn('application()', code)
+        self.assertNotIn('Auth', code)
+        with patch.dict(cli.os.environ, {'WEATHER_MODE': 'postgres', 'WEATHER_ALLOW_DATABASE': 'production'}, clear=True), patch.object(cli, 'secret_setting', return_value='opaque-fixture') as secret, patch.object(store, 'PostgresStore') as postgres, patch.object(cli.os, 'kill') as kill:
+            exec(code, {})
+            kill.assert_called_once_with(1, 0)
+            secret.assert_called_once_with('WEATHER_DATABASE_URL')
+            postgres.return_value.check_ready.assert_called_once()
+            postgres.return_value.check_ready.side_effect = RuntimeError('must-not-appear-in-health-output')
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as failure:
+                exec(code, {})
+            self.assertEqual(failure.exception.code, 1)
+            self.assertEqual(stdout.getvalue() + stderr.getvalue(), '')
 
     def test_all_runtime_dry_runs_have_no_side_effect(self):
         with patch.object(runtime, 'docker', side_effect=AssertionError('Docker touched')):
@@ -101,6 +129,52 @@ class NASContracts(unittest.TestCase):
             with self.assertRaises(ValueError): prepare.main(['--secret-dir', '/tmp/unapproved', '--apply'])
 
 
+
+    def test_secret_parent_root_custody_and_file_only_ownership(self):
+        path = unittest.mock.Mock()
+        path.parent.is_dir.return_value = True
+        path.parent.resolve.return_value = path.parent
+        path.parent.stat.return_value = SimpleNamespace(st_uid=0, st_mode=0o755)
+        path.exists.return_value = True
+        path.is_symlink.return_value = False
+        path.is_dir.return_value = True
+        path.stat.return_value = SimpleNamespace(st_uid=0, st_mode=0o700)
+        with patch.object(prepare.os, 'chown') as chown:
+            prepare.ensure_secret_directory(path)
+            chown.assert_not_called()
+            path.stat.return_value = SimpleNamespace(st_uid=10001, st_mode=0o700)
+            with self.assertRaises(ValueError): prepare.ensure_secret_directory(path)
+            path.exists.return_value = False
+            prepare.ensure_secret_directory(path)
+            path.mkdir.assert_called_once_with(mode=0o700)
+            chown.assert_called_once_with(path, 0, 0)
+        path.open.assert_not_called()
+        path.read_text.assert_not_called()
+
+    def test_admit_uses_pinned_standalone_compose_and_two_own_services(self):
+        def fields(kind, target, expression):
+            if expression == '{{if .State.Health}}{{.State.Health.Status}}{{end}}': return 'healthy'
+            if expression == '{{.Id}}': return 'forecast-id'
+            if kind == 'network': return json.dumps({'forecast-id': {'Name': runtime.APPS['forecast']}})
+            networks = {'my-pa-nas-contract_data-plane': {'NetworkID': runtime.NETWORKS['my-pa-nas-contract_data-plane']}}
+            if target == runtime.APP:
+                networks['my-pa-nas-contract_browser-origin'] = {'NetworkID': runtime.NETWORKS['my-pa-nas-contract_browser-origin']}
+            else:
+                networks['lakehouse-weather-egress'] = {'NetworkID': 'egress-id'}
+            return json.dumps(networks)
+        args = ['admit', '--apply', '--image-id', 'sha256:' + 'c'*64, '--reviewed-head', 'a'*40, '--reviewed-tree', 'b'*40, '--registry', '/registry', '--database-url-file', '/runtime-dsn', '--ingest-token-file', '/ingest', '--forecast-database-url-file', '/forecast-dsn']
+        with patch.object(runtime, 'identity'), patch.object(runtime, 'docker', return_value=''), patch.object(runtime, 'mount_path', side_effect=lambda value, *args: value), patch.object(runtime, 'field', side_effect=fields), patch.object(runtime.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='2.20.3')) as run, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runtime.main(args), 0)
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(commands[0], ['sudo', '-n', '/usr/local/bin/docker-compose', 'version', '--short'])
+            self.assertEqual([command[-1] for command in commands[1:]], ['dashboard', 'forecast'])
+            for command in commands[1:]:
+                self.assertIn('/usr/local/bin/docker-compose', command)
+                self.assertNotIn('compose', command)
+                self.assertIn('--no-deps', command)
+                self.assertIn('--no-build', command)
+                self.assertIn('/dev/null', command)
+
     def test_forecast_loop_timeout_nonoverlap_and_health_metadata(self):
         loop = load('forecast_loop')
         with tempfile.TemporaryDirectory() as folder, patch.object(loop, 'STATE', Path(folder) / 'state.json'), patch.object(loop.subprocess, 'run', side_effect=loop.subprocess.TimeoutExpired('refresh', 120)) as run:
@@ -141,6 +215,11 @@ class NASContracts(unittest.TestCase):
             self.assertNotIn(forbidden, allow)
         self.assertIn('redir @weather_redirect /weather/ 308', text)
         self.assertIn('respond 404', text)
+        self.assertIn('/weather/login /weather/login.css /weather/login.js /weather/api/auth/status', allow)
+        write = text.split('@weather_auth_write {', 1)[1].split('}', 1)[0]
+        self.assertIn('method POST', write)
+        self.assertIn('path /weather/api/auth/login /weather/api/auth/logout /weather/api/auth/refresh', write)
+        self.assertNotIn('Cloudflare Access protects', text)
 
 
 if __name__ == '__main__':

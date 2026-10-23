@@ -8,7 +8,10 @@ installs a public route. It creates one approved weather-only egress bridge for
 forecast HTTPS access; only the forecast service joins it. Run the scripts on the NAS as the authorized operator. Verify Python 3 is
 available before staging; no interpreter installation is performed here. Admission
 requires authorized root execution (`sudo -n python3`) to stat protected secret
-paths; file contents are never read by admission.
+paths; file contents are never read by admission. NAS Python 3.8 is supported.
+Docker metadata uses `/usr/local/bin/docker`; admission uses the explicitly pinned
+standalone `/usr/local/bin/docker-compose`, whose v2 version is checked before
+mutation. It does not assume a Docker CLI Compose plugin or search PATH.
 No script has been executed against the NAS as part of authoring this package.
 
 Admission requires independently reviewed source head and tree, the corresponding
@@ -27,14 +30,17 @@ Prepare `/volume1/weather-dashboard/<reviewed-head>/` containing this exact revi
 source/package. Prepare four explicit read-only files: approved station registry,
 dedicated weather-runtime database URL, separate cache-only forecast-role database
 URL and a random ingest token of at least 32
-characters. Secrets live under `/volume1/weather-dashboard/secrets/` with parent
-traversal permission for UID 10001, files owned by UID 10001 mode 0400; operator-only
+characters. Secrets live under `/volume1/weather-dashboard/secrets/` with a root-owned mode-0700 parent directory and files owned by UID 10001 mode 0400; operator-only
 files use 0600. Never display the secret contents or place them in command arguments.
 For a new installation, the authorized root operator can run `python3
 ops/nas/prepare_runtime.py --secret-dir /volume1/weather-dashboard/secrets --uid
 10001` to review the dry run, then add `--apply` to generate an exclusive new
 ingest-token. It refuses existing token paths and never prints or reads token
-contents. The database owner provisions both database URL files separately. The forecast
+contents. The database owner provisions both database URL files separately. Both provisioners
+accept the same root-owned mode-0700 secret directory, so either can run first.
+Docker binds the individual secret files into the container; UID 10001 does not
+need host-parent traversal permission. Never chown the secret directory to the
+application user. The forecast
 role can access only forecast cache rows, without observations or registry writes;
 only its DSN and the registry are mounted into the egress-capable service. The
 application requires the ingest token even while all stations are disabled.
@@ -105,28 +111,60 @@ service off general egress. RF remains deferred.
 ## Protected public route
 
 `ops/nas/weather.caddy.fragment` is an inert candidate for the existing public
-proxy. It allows only GET dashboard/history and named browser assets, strips the
-`/weather` prefix and returns 404 for all other weather paths/methods. The redirect
-uses relative `/weather/`. It never exposes health, readiness or ingestion.
+proxy. It proxies named browser GET routes and only the exact login/logout/refresh
+POST routes to the application, strips `/weather`, and returns 404 for other weather
+paths/methods. It never serves files directly or exposes health, readiness or ingestion.
+The `/weather` redirect uses relative `/weather/`.
 
-Activation is blocked until the Manager completes Cloudflare Access account/sign-in
-and configures an explicit authorized-user policy protecting **both** `/weather`
-and `/weather/*` on `www.bobby-fetting.me`, with default denial and direct-origin
-bypass prevented. Preserve existing `/pa` rules and upstream identity. Validate the
-fragment within the complete existing Caddy config using `caddy validate`; only
-then perform a separately authorized proxy reload and existing-tunnel update.
-No fragment import, proxy reload or tunnel mutation is performed by this package.
+The operator selected the application's dedicated password and remembered sessions;
+Cloudflare Access is not required. PostgreSQL mode enables application authentication
+unconditionally and requires `WEATHER_AUTH_ORIGIN=https://www.bobby-fetting.me`, fixed
+in the dashboard Compose environment. The forecast service receives no browser-auth
+configuration. Password material and opaque session hashes live in weather-owned
+PostgreSQL tables; there is no password file or additional authentication service.
 
-Acceptance must prove: unauthenticated weather paths denied at Access; authorized
-user can load assets, dashboard and bounded history; `/weather` redirects correctly;
-POST/ingest/health/ready/unknown paths blocked; `/pa` remains healthy. Complete an
-actual iPhone Safari check before claiming mobile commissioning. Do not rely only
-on a client-supplied Access header or make an unprotected public exception.
+Before public route activation, the owner must establish the password through an
+interactive SSH TTY and the hidden setup command in the admitted dashboard container:
+
+```sh
+sudo -n /usr/local/bin/docker exec -it lakehouse-weather-dashboard \
+  python -m weather setup-password --email OWNER_EMAIL
+```
+
+Replace `OWNER_EMAIL` privately. The command requires a real TTY and asks for the
+password twice with getpass; never put passwords in arguments, environment, chat,
+files, screenshots or command output. No public account-bootstrap endpoint is
+exposed. Initial setup is operator-controlled; credential replacement remains a
+separate explicit owner decision.
+
+Only `/login`, `/login.css`, `/login.js` and `/api/auth/status` are public application
+paths. Other browser assets, dashboard and history require a valid session. Login,
+logout and refresh require exact canonical Origin and CSRF validation. Remembered
+sessions use Secure, HttpOnly, SameSite=Strict, host-only cookies scoped to
+`/weather/`, with the selected 60-day remembered-session policy. Do not alter the
+canonical origin or trust a client-supplied authentication header to bypass this.
+
+Activation is blocked until independent review and internal verification prove that
+unconfigured authentication fails closed and the owner has completed hidden password
+setup. Preserve existing `/pa` rules and upstream identity. Validate the fragment
+inside the complete Caddy config using `caddy validate`; only then perform a
+separately authorized proxy reload and existing-tunnel update. No fragment import,
+proxy reload or tunnel mutation is performed by this package.
+
+Acceptance must prove: unauthenticated dashboard/assets/history denied or redirected
+to login; public login/status works without leaking credentials; wrong password and
+wrong Origin/CSRF denied; authenticated dashboard/history/assets work; logout revokes
+the session; remembered-session persistence and expiry work; `/weather` redirects;
+ingest/health/ready/unknown paths remain blocked; `/pa` remains healthy. Complete an
+actual iPhone Safari check before claiming mobile commissioning. Backup archives now
+include weather credential/session hashes and require the same protected handling
+as database backups; never display or publish their contents.
 
 ## Weather-only backup and restore rehearsal
 
 After owner review, create an empty operator-owned mode-0700 directory on the NAS
-outside the source checkout. This backup contains weather data, not credentials:
+outside the source checkout. This backup contains weather data and weather credential/session hashes. Treat it
+as sensitive and never display or publish its contents:
 
 ```sh
 python3 ops/nas/backup_weather.py --destination /EXPLICIT/EMPTY/BACKUP/DIRECTORY

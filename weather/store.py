@@ -69,6 +69,9 @@ class PostgresStore:
             connection.execute('SELECT id FROM weather.stations LIMIT 0')
             connection.execute('SELECT station_id FROM weather.observations LIMIT 0')
             connection.execute('SELECT location_id FROM weather.forecast_cache LIMIT 0')
+            connection.execute('SELECT id FROM weather.auth_users LIMIT 0')
+            connection.execute('SELECT token_hash FROM weather.auth_sessions LIMIT 0')
+            connection.execute('SELECT scope FROM weather.auth_limits LIMIT 0')
         return True
 
     def sync_registry(self, locations):

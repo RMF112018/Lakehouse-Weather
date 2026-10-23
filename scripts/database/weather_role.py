@@ -9,7 +9,9 @@ from urllib.parse import quote
 
 REVISION = 'a91b7d3c8e20'
 TABLES = {'locations': 'SELECT, INSERT, UPDATE', 'stations': 'SELECT, INSERT, UPDATE',
-          'observations': 'SELECT, INSERT', 'forecast_cache': 'SELECT, INSERT, UPDATE'}
+          'observations': 'SELECT, INSERT', 'forecast_cache': 'SELECT, INSERT, UPDATE',
+          'auth_users': 'SELECT, INSERT, UPDATE', 'auth_sessions': 'SELECT, INSERT, UPDATE, DELETE',
+          'auth_limits': 'SELECT, INSERT, UPDATE'}
 
 
 def parser():
@@ -75,7 +77,7 @@ def verify(conn, role):
                 actual = actual or conn.execute('SELECT has_any_column_privilege(%s,%s,%s)', (role,oid,privilege)).fetchone()[0]
             if actual != allowed:
                 raise ValueError('Unexpected runtime table privilege')
-    if conn.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='weather' AND table_name=ANY(%s)", (list(TABLES),)).fetchone()[0] != 4:
+    if conn.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='weather' AND table_name=ANY(%s)", (list(TABLES),)).fetchone()[0] != len(TABLES):
         raise ValueError('Weather tables incomplete')
     if not conn.execute("SELECT has_schema_privilege(%s,'weather','USAGE')", (role,)).fetchone()[0]:
         raise ValueError('Missing weather schema USAGE')

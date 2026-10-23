@@ -9,6 +9,7 @@ services:
     environment:
       WEATHER_MODE: postgres
       WEATHER_ALLOW_DATABASE: production
+      WEATHER_AUTH_ORIGIN: https://www.bobby-fetting.me
       WEATHER_REGISTRY: /run/weather/stations.json
       WEATHER_DATABASE_URL_FILE: /run/weather/database-url
       WEATHER_INGEST_TOKEN_FILE: /run/weather/ingest-token
@@ -39,7 +40,8 @@ services:
     logging:
       driver: none
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health', timeout=3).close(); urllib.request.urlopen('http://127.0.0.1:8765/api/ready', timeout=3).close()"]
+      # Private dependency probe: no HTTP authentication, session reads or setup requirement.
+      test: ["CMD", "python", "-c", "import os,sys\ntry:\n    os.kill(1, 0)\n    assert os.environ.get('WEATHER_MODE') == 'postgres'\n    from weather.__main__ import secret_setting\n    from weather.store import PostgresStore\n    PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE')).check_ready()\nexcept Exception:\n    sys.exit(1)"]
       interval: 30s
       timeout: 8s
       retries: 3

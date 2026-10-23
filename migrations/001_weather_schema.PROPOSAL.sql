@@ -26,3 +26,23 @@ CREATE TABLE weather.forecast_cache (
 );
 -- No retention deletion: observations remain until owner-approved policy exists.
 -- Existing composite PK supports station/time history and latest queries.
+CREATE TABLE weather.auth_users (
+    id integer PRIMARY KEY CHECK (id = 1),
+    email text NOT NULL,
+    password_hash text NOT NULL
+);
+CREATE TABLE weather.auth_sessions (
+    token_hash text PRIMARY KEY,
+    csrf_hash text NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('challenge', 'session')),
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    revoked boolean NOT NULL DEFAULT FALSE,
+    CHECK (expires_at > created_at AND expires_at <= created_at + INTERVAL '60 days')
+);
+CREATE INDEX auth_sessions_expiry ON weather.auth_sessions (expires_at);
+CREATE TABLE weather.auth_limits (
+    scope text PRIMARY KEY CHECK (scope IN ('challenge', 'login-global', 'login-owner')),
+    window_start timestamptz NOT NULL,
+    attempts integer NOT NULL CHECK (attempts > 0)
+);

@@ -9,6 +9,19 @@ import stat
 SECRET_DIR = Path('/volume1/weather-dashboard/secrets')
 
 
+def ensure_secret_directory(path):
+    """Validate metadata only; root keeps custody of the host parent directory."""
+    parent = path.parent
+    if not parent.is_dir() or parent.resolve() != parent or parent.stat().st_uid != 0 or parent.stat().st_mode & 0o022:
+        raise ValueError('Root-owned reviewed parent directory required')
+    if path.exists():
+        if path.is_symlink() or not path.is_dir() or path.stat().st_uid != 0 or stat.S_IMODE(path.stat().st_mode) != 0o700:
+            raise ValueError('Existing secret directory must be root-owned mode 0700')
+    else:
+        path.mkdir(mode=0o700)
+        os.chown(path, 0, 0)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--secret-dir', required=True)
@@ -23,14 +36,7 @@ def main(argv=None):
         return 0
     if os.geteuid() != 0:
         raise ValueError('Authorized root operator execution required')
-    if not path.parent.is_dir() or path.parent.resolve() != path.parent:
-        raise ValueError('Prepare the root-owned reviewed parent directory first')
-    if path.exists():
-        if path.is_symlink() or not path.is_dir() or path.stat().st_uid != 10001 or stat.S_IMODE(path.stat().st_mode) != 0o700:
-            raise ValueError('Existing secret directory metadata mismatch')
-    else:
-        path.mkdir(mode=0o700)
-        os.chown(path, 10001, 10001)
+    ensure_secret_directory(path)
     # O_EXCL/O_NOFOLLOW fail closed on existing paths. No existing file is read.
     descriptor = os.open(path / 'ingest-token', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
     try:

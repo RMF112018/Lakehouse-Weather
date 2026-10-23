@@ -3,11 +3,13 @@ import argparse
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from . import demo, forecast, registry
+from .auth import Auth
 from .server import Application, Server, handler
 from .store import PostgresStore
 
@@ -39,7 +41,8 @@ def application():
         raise ValueError('WEATHER_INGEST_TOKEN requires at least 32 characters')
     store = PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE'))
     store.sync_registry(locations)
-    return Application(locations, store, mode, token, allow_ingest=True)
+    auth = Auth(store, os.environ.get('WEATHER_AUTH_ORIGIN', ''))
+    return Application(locations, store, mode, token, allow_ingest=True, auth=auth)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -54,10 +57,29 @@ def main():
     serve.add_argument('--host', default='127.0.0.1')
     serve.add_argument('--port', default=8765, type=int)
     commands.add_parser('refresh-forecasts')
+    setup = commands.add_parser('setup-password', help='Set owner password through hidden interactive TTY prompts')
+    setup.add_argument('--email', required=True)
     forward = commands.add_parser('forward', help='Forward bounded rtl_433 JSON lines from stdin')
     forward.add_argument('--url', default='http://127.0.0.1:8765/api/ingest/rtl433')
     args = parser.parse_args()
     try:
+        if args.command == 'setup-password':
+            import getpass
+            if not sys.stdin.isatty() or not sys.stderr.isatty() or os.environ.get('WEATHER_MODE') != 'postgres':
+                raise ValueError('Interactive PostgreSQL owner setup required')
+            auth = Auth(PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE')), os.environ.get('WEATHER_AUTH_ORIGIN',''))
+            with warnings.catch_warnings():
+                warnings.simplefilter('error', getpass.GetPassWarning)
+                try:
+                    password = getpass.getpass('New weather password (14–128 characters): ')
+                    confirm = getpass.getpass('Confirm weather password: ')
+                except getpass.GetPassWarning:
+                    raise ValueError('Hidden terminal input unavailable') from None
+            if password != confirm:
+                raise ValueError('Password confirmation differs')
+            auth.setup(args.email, password)
+            print('Weather password updated; prior sessions revoked')
+            return 0
         if args.command == 'forward':
             url = urlsplit(args.url)
             if url.scheme not in ('http', 'https') or url.username or url.password or url.query or url.fragment or url.path != '/api/ingest/rtl433':

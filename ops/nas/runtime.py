@@ -19,6 +19,7 @@ APP = 'lakehouse-weather-dashboard'
 APPS = {'dashboard': APP, 'forecast': 'lakehouse-weather-forecast'}
 COMPOSE = Path(__file__).resolve().parents[2] / 'compose.dashboard.production.yaml'
 DOCKER = ['sudo', '-n', '/usr/local/bin/docker']
+COMPOSE_BINARY = '/usr/local/bin/docker-compose'
 
 
 def docker(*args):
@@ -134,10 +135,15 @@ def main(argv=None):
     # sudo normally filters environment. Pass only non-secret mount paths and the
     # immutable image ID explicitly through env; secret contents never enter argv.
     compose_env = ['WEATHER_IMAGE_ID', 'WEATHER_REGISTRY_PATH', 'WEATHER_DATABASE_URL_PATH', 'WEATHER_INGEST_TOKEN_PATH', 'WEATHER_FORECAST_LOOP_PATH', 'WEATHER_FORECAST_DATABASE_URL_PATH']
-    privileged = ['sudo', '-n', '/usr/bin/env', *[key + '=' + env[key] for key in compose_env], '/usr/local/bin/docker']
+    # Synology exposes Compose as its separate reviewed absolute executable.
+    # Do not discover an executable via PATH or assume docker compose exists.
+    version = subprocess.run(['sudo', '-n', COMPOSE_BINARY, 'version', '--short'], capture_output=True, text=True)
+    if version.returncode or not re.fullmatch(r'v?2\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?', version.stdout.strip()):
+        raise ValueError('Verified standalone Docker Compose v2 required')
+    privileged = ['sudo', '-n', '/usr/bin/env', *[key + '=' + env[key] for key in compose_env], COMPOSE_BINARY]
     # Explicit file/project and --no-deps cannot recreate my-pa services. Image
     # has no mutable tag and pulling/building are forbidden by this command.
-    compose = [*privileged, 'compose', '--env-file', '/dev/null', '--project-name', 'lakehouse-weather', '--file', str(COMPOSE),
+    compose = [*privileged, '--env-file', '/dev/null', '--project-name', 'lakehouse-weather', '--file', str(COMPOSE),
                'up', '--detach', '--no-deps', '--no-build', '--pull', 'never']
     for service in ('dashboard', 'forecast'):
         result = subprocess.run([*compose, service], env=env, capture_output=True)

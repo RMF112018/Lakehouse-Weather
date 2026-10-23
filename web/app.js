@@ -1,5 +1,7 @@
 'use strict';
 (() => {
+  const signout=document.getElementById('signout');
+  if(signout) signout.addEventListener('click',async()=>{signout.disabled=true;try{const status=await fetch('./api/auth/status',{cache:'no-store'});const data=await status.json();if(!data.authenticated){location.replace('./login');return;}const out=await fetch('./api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json','X-Weather-CSRF':data.csrf},body:'{}'});if(out.ok)location.replace('./login');else throw Error();}catch{signout.disabled=false;signout.textContent='Try sign out again';}});
   const $ = id => document.getElementById(id);
   const state = { data: null, location: null, station: null, unit: 'F', hours: 24, metric: 'temperature_c', history: null, request: 0 };
   try { state.unit = localStorage.getItem('weatherhouse-unit') === 'C' ? 'C' : 'F'; } catch (_) { /* Private browsing can disable storage. */ }
@@ -55,7 +57,7 @@
   }
   async function api(path) {
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 15000);
-    try { const response = await fetch(`./api/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' }, cache: 'no-store' }); if (!response.ok) throw new Error(`Weather service returned ${response.status}.`); return await response.json(); }
+    try { const response = await fetch(`./api/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' }, cache: 'no-store' }); if(response.status===401){location.replace('./login');throw new Error('Please sign in again.');} if (!response.ok) throw new Error(`Weather service returned ${response.status}.`); return await response.json(); }
     finally { clearTimeout(timeout); }
   }
   function message(text) { $('error').hidden = !text; set('error', text); }
@@ -65,6 +67,7 @@
       const data = await api('dashboard');
       if (!Array.isArray(data.locations)) throw new Error('The weather service returned an unexpected response.');
       state.data = data;
+      if(signout)signout.hidden=data.mode==='demo';
       state.location = data.locations.find(l => l.id === state.location?.id) || data.locations[0] || null;
       state.station = state.location?.stations?.find(s => s.id === state.station?.id) || state.location?.stations?.[0] || null;
       state.request++; state.history = null;

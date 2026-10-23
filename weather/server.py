@@ -14,9 +14,12 @@ from .registry import resolve
 
 
 class Application:
-    def __init__(self, locations, store, mode='demo', token='', allow_ingest=False):
+    def __init__(self, locations, store, mode='demo', token='', allow_ingest=False, auth=None):
         self.locations, self.store, self.mode = locations, store, mode
         self.token = token
+        self.auth = auth
+        if mode != 'demo' and auth is None:
+            raise ValueError('Password authentication required')
         self.allow_ingest = allow_ingest
         self.station_ids = {s['id'] for loc in locations for s in loc['stations']}
 
@@ -43,6 +46,28 @@ def dispatch(app, web_root, method, target, headers, stream):
     """One bounded HTTP contract shared by WSGI and the local demo adapter."""
     try:
         parsed = urlsplit(target)
+        if app.auth:
+            if parsed.path.startswith('/api/auth/'):
+                body = {}
+                if method == 'POST':
+                    if headers.get('transfer-encoding') or headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
+                        return 400, {'error':'JSON required'}, None
+                    length = int(headers.get('content-length', '0'))
+                    if not 1 <= length <= 2048:
+                        return 413, {'error':'Body too large'}, None
+                    raw = stream.read(length)
+                    if len(raw) != length:
+                        return 400, {'error':'Incomplete body'}, None
+                    body = json.loads(raw)
+                    if not isinstance(body,dict):
+                        return 400, {'error':'Invalid request'}, None
+                return app.auth.handle(method,parsed.path,headers,body)
+            public = method == 'GET' and parsed.path in ('/login','/login.css','/login.js')
+            ingest = method == 'POST' and parsed.path == '/api/ingest/rtl433'
+            if not public and not ingest and not app.auth.session(headers):
+                if method == 'GET' and parsed.path in ('/', '/index.html'):
+                    return 303, {'error':'Sign in required'}, None, [('Location','/weather/login')]
+                return 401, {'error':'Sign in required'}, None
         if method == 'GET':
             if parsed.path == '/api/health':
                 return 200, {'status': 'ok'}, None
@@ -61,7 +86,7 @@ def dispatch(app, web_root, method, target, headers, stream):
             if parsed.path.startswith('/api/'):
                 return 404, {'error': 'Not found'}, None
             root = Path(web_root).resolve()
-            relative = unquote(parsed.path).lstrip('/') or 'index.html'
+            relative = ('login.html' if parsed.path == '/login' else unquote(parsed.path).lstrip('/')) or 'index.html'
             path = root / relative
             if '..' in Path(relative).parts or any(p.is_symlink() for p in [path, *path.parents]) or not path.resolve().is_relative_to(root) or not path.is_file():
                 return 404, {'error': 'Not found'}, None
@@ -95,14 +120,14 @@ def dispatch(app, web_root, method, target, headers, stream):
         return 503, {'error': 'Weather service unavailable'}, None
 
 
-def response(status, value, content_type=None):
+def response(status, value, content_type=None, extra_headers=None):
     content_type = content_type or 'application/json; charset=utf-8'
     raw = json.dumps(value, allow_nan=False).encode() if content_type.startswith('application/json') else value
     headers = [('Content-Type', content_type), ('Content-Length', str(len(raw))),
                ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'),
                ('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"),
                ('Referrer-Policy', 'no-referrer')]
-    return status, headers, raw
+    return status, headers + (extra_headers or []), raw
 
 
 def wsgi(app, web_root):
