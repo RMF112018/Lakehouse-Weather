@@ -1,3 +1,4 @@
-# Exact direct/binary versions validated in the isolated PostgreSQL test fixture.
+# Exact runtime versions. Container serving uses the full hash lock.
 psycopg==3.3.6
 psycopg-binary==3.3.6
+typing-extensions==4.16.0; python_version < "3.13"

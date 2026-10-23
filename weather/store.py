@@ -11,6 +11,9 @@ class MemoryStore:
         self.rows, self.forecasts = {}, {}
         self.lock = threading.RLock()
 
+    def check_ready(self):
+        return True
+
     def insert(self, station_id, observation):
         with self.lock:
             rows = self.rows.setdefault(station_id, {})
@@ -43,8 +46,8 @@ class PostgresStore:
     def __init__(self, url, gate):
         parsed = urlparse(url)
         # Disallow libpq overrides, service files and alternate dbname parameters.
-        if gate != 'nonproduction' or parsed.scheme not in ('postgres', 'postgresql') or unquote(parsed.path) != '/my_pa' or parsed.query or parsed.fragment:
-            raise ValueError('Explicit nonproduction my_pa PostgreSQL URL required; query options are prohibited')
+        if gate not in ('nonproduction', 'production') or parsed.scheme not in ('postgres', 'postgresql') or unquote(parsed.path) != '/my_pa' or parsed.query or parsed.fragment:
+            raise ValueError('Explicit my_pa PostgreSQL environment gate and URL required; query options are prohibited')
         import psycopg
         self.psycopg, self.url = psycopg, url
         with self.connection() as connection:
@@ -58,6 +61,15 @@ class PostgresStore:
 
     def connection(self):
         return self.psycopg.connect(self.url, connect_timeout=5, options='-c statement_timeout=5000 -c search_path=pg_catalog')
+
+    def check_ready(self):
+        with self.connection() as connection:
+            # Prove the schema contract remains available, including an empty registry.
+            connection.execute('SELECT id FROM weather.locations LIMIT 0')
+            connection.execute('SELECT id FROM weather.stations LIMIT 0')
+            connection.execute('SELECT station_id FROM weather.observations LIMIT 0')
+            connection.execute('SELECT location_id FROM weather.forecast_cache LIMIT 0')
+        return True
 
     def sync_registry(self, locations):
         with self.connection() as conn:

@@ -12,6 +12,20 @@ from .server import Application, Server, handler
 from .store import PostgresStore
 
 
+def secret_setting(name):
+    """Read a value OR a mounted secret file; never echo secret contents."""
+    value, filename = os.environ.get(name), os.environ.get(name + '_FILE')
+    if value is not None and filename:
+        raise ValueError('Use one secret configuration source')
+    if filename:
+        with open(filename, encoding='utf-8') as handle:
+            value = handle.read(65537)
+        if len(value) > 65536:
+            raise ValueError('Secret file too large')
+        value = value.rstrip('\r\n')
+    return value or ''
+
+
 def application():
     mode = os.environ.get('WEATHER_MODE', 'demo')
     if mode == 'demo':
@@ -20,10 +34,10 @@ def application():
     if mode != 'postgres':
         raise ValueError('WEATHER_MODE must be demo or postgres')
     locations = registry.load(os.environ['WEATHER_REGISTRY'])
-    token = os.environ.get('WEATHER_INGEST_TOKEN', '')
+    token = secret_setting('WEATHER_INGEST_TOKEN')
     if len(token) < 32:
         raise ValueError('WEATHER_INGEST_TOKEN requires at least 32 characters')
-    store = PostgresStore(os.environ['WEATHER_DATABASE_URL'], os.environ.get('WEATHER_ALLOW_DATABASE'))
+    store = PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE'))
     store.sync_registry(locations)
     return Application(locations, store, mode, token, allow_ingest=True)
 
@@ -50,7 +64,7 @@ def main():
                 raise ValueError('Explicit receiver endpoint required')
             if url.scheme == 'http' and url.hostname not in ('127.0.0.1', 'localhost', '::1'):
                 raise ValueError('Non-loopback receiver endpoints require HTTPS')
-            token = os.environ.get('WEATHER_INGEST_TOKEN', '')
+            token = secret_setting('WEATHER_INGEST_TOKEN')
             if len(token) < 32:
                 raise ValueError('Receiver token required')
             while True:
@@ -85,13 +99,21 @@ def main():
                     print('Receiver delivery failed; packet not acknowledged', file=sys.stderr)
                     return 1
             return 0
-        app = application()
         if args.command == 'refresh-forecasts':
-            if app.mode != 'postgres':
+            if os.environ.get('WEATHER_MODE', 'demo') != 'postgres':
                 raise ValueError('Remote forecast refresh is disabled in synthetic demo mode')
-            successes = [forecast.refresh(app.store, location) for location in app.locations]
+            # Cache-only role: no Application construction, ingest secret or registry writes.
+            try:
+                locations = registry.load(os.environ['WEATHER_REGISTRY'])
+                store = PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE'))
+                successes = [forecast.refresh(store, location) for location in locations]
+            except Exception:
+                # Driver errors can include connection material; never print them.
+                print('Forecast refresh failed; check configuration and cache-role readiness', file=sys.stderr)
+                return 1
             print(f'Forecast refresh: {sum(successes)}/{len(successes)} locations')
             return 0 if all(successes) else 1
+        app = application()
         web_root = Path(__file__).resolve().parents[1] / 'web'
         with Server((args.host, args.port), handler(app, web_root)) as server:
             print(f'Weather dashboard mode={app.mode} listening at {args.host}:{args.port}', flush=True)

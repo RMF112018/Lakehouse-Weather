@@ -16,11 +16,18 @@ def validate_registry(value):
         ZoneInfo(location['timezone'])
         if not isinstance(location['name'], str) or not location['name']:
             raise ValueError('Location name required')
+        coordinates = (location['latitude'], location['longitude'])
+        if None in coordinates and coordinates != (None, None):
+            raise ValueError('Coordinates must both be configured or both pending')
         for key, bound in [('latitude', 90), ('longitude', 180)]:
             coordinate = location[key]
+            if coordinate is None:
+                continue
             if type(coordinate) not in (int, float) or not math.isfinite(coordinate) or abs(coordinate) > bound:
                 raise ValueError('Invalid coordinate')
         for station in location['stations']:
+            if type(station.get('ingest_enabled', True)) is not bool:
+                raise ValueError('Ingest enabled must be boolean')
             sid = station['id']
             sensor = (station['receiver_model'], str(station['sensor_id']))
             if not isinstance(sid, str) or not sid or sid in station_ids or sensor in sensors:
@@ -40,6 +47,6 @@ def load(path):
 def resolve(locations, packet):
     for location in locations:
         for station in location['stations']:
-            if (packet.get('model'), str(packet.get('id'))) == (station['receiver_model'], str(station['sensor_id'])):
+            if station.get('ingest_enabled', True) and (packet.get('model'), str(packet.get('id'))) == (station['receiver_model'], str(station['sensor_id'])):
                 return station['id']
     raise ValueError('Unknown receiver model or sensor ID')

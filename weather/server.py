@@ -39,9 +39,90 @@ class Application:
         return {'station_id': station_id, 'inserted': self.store.insert(station_id, observation)}
 
 
-def handler(app, web_root):
-    root = Path(web_root).resolve()
+def dispatch(app, web_root, method, target, headers, stream):
+    """One bounded HTTP contract shared by WSGI and the local demo adapter."""
+    try:
+        parsed = urlsplit(target)
+        if method == 'GET':
+            if parsed.path == '/api/health':
+                return 200, {'status': 'ok'}, None
+            if parsed.path == '/api/ready':
+                app.store.check_ready()
+                return 200, {'status': 'ready', 'mode': app.mode}, None
+            if parsed.path == '/api/dashboard':
+                return 200, app.dashboard(), None
+            if parsed.path == '/api/history':
+                query = parse_qs(parsed.query, strict_parsing=True, max_num_fields=8)
+                station = query.get('station_id', [''])[0]
+                hours = int(query.get('hours', ['48'])[0])
+                if station not in app.station_ids or not 1 <= hours <= 168:
+                    return 400, {'error': 'Known station and hours between 1 and 168 required'}, None
+                return 200, {'station_id': station, 'hours': hours, 'history': app.store.history(station, datetime.now(timezone.utc)-timedelta(hours=hours))}, None
+            if parsed.path.startswith('/api/'):
+                return 404, {'error': 'Not found'}, None
+            root = Path(web_root).resolve()
+            relative = unquote(parsed.path).lstrip('/') or 'index.html'
+            path = root / relative
+            if '..' in Path(relative).parts or any(p.is_symlink() for p in [path, *path.parents]) or not path.resolve().is_relative_to(root) or not path.is_file():
+                return 404, {'error': 'Not found'}, None
+            return 200, path.read_bytes(), mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
+        if method != 'POST':
+            return 405, {'error': 'Method not allowed'}, None
+        if parsed.path != '/api/ingest/rtl433':
+            return 404, {'error': 'Not found'}, None
+        if not app.allow_ingest or not app.token:
+            return 403, {'error': 'Ingestion is disabled'}, None
+        supplied = headers.get('authorization', '')
+        if not hmac.compare_digest(supplied.encode(), ('Bearer ' + app.token).encode()):
+            return 401, {'error': 'Unauthorized'}, None
+        if headers.get('transfer-encoding') or headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
+            return 400, {'error': 'JSON with Content-Length required'}, None
+        length = int(headers.get('content-length', '0'))
+        if not 1 <= length <= 16384:
+            return 413, {'error': 'Body must be between 1 and 16384 bytes'}, None
+        raw = stream.read(length)
+        if len(raw) != length:
+            return 400, {'error': 'Incomplete body'}, None
+        packet = json.loads(raw)
+        if not isinstance(packet, dict):
+            raise ValueError('Packet object required')
+        return 200, app.ingest(packet), None
+    except (ValueError, TypeError, UnicodeError):
+        return 400, {'error': 'Invalid request or sensor identity'}, None
+    except (socket.timeout, TimeoutError):
+        return 408, {'error': 'Request timed out'}, None
+    except Exception:
+        return 503, {'error': 'Weather service unavailable'}, None
 
+
+def response(status, value, content_type=None):
+    content_type = content_type or 'application/json; charset=utf-8'
+    raw = json.dumps(value, allow_nan=False).encode() if content_type.startswith('application/json') else value
+    headers = [('Content-Type', content_type), ('Content-Length', str(len(raw))),
+               ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'),
+               ('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"),
+               ('Referrer-Policy', 'no-referrer')]
+    return status, headers, raw
+
+
+def wsgi(app, web_root):
+    """WSGI callable. Proxy strips /weather/; SCRIPT_NAME is never inferred from headers."""
+    from http import HTTPStatus
+    def application(environ, start_response):
+        headers = {key[5:].replace('_', '-').lower(): value for key, value in environ.items() if key.startswith('HTTP_')}
+        headers.update({'content-type': environ.get('CONTENT_TYPE', ''), 'content-length': environ.get('CONTENT_LENGTH', '')})
+        # PATH_INFO is already percent-decoded by WSGI. Quote it once to share
+        # the exact traversal checks with the stdlib transport.
+        from urllib.parse import quote
+        target = quote(environ.get('PATH_INFO', '/'), safe='/') + '?' + environ.get('QUERY_STRING', '')
+        result = dispatch(app, web_root, environ['REQUEST_METHOD'], target, headers, environ['wsgi.input'])
+        status, response_headers, raw = response(*result)
+        start_response(f'{status} {HTTPStatus(status).phrase}', response_headers)
+        return [raw]
+    return application
+
+
+def handler(app, web_root):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'LakehouseWeather'
         def setup(self):
@@ -49,72 +130,20 @@ def handler(app, web_root):
             self.connection.settimeout(10)
 
         def log_message(self, *args):
-            pass  # Do not log paths, headers, bodies or tokens.
+            pass  # Never log paths, headers, bodies or tokens.
 
-        def send_data(self, status, value, content_type='application/json; charset=utf-8'):
-            raw = json.dumps(value, allow_nan=False).encode() if content_type.startswith('application/json') else value
+        def handle_request(self):
+            self.close_connection = True
+            result = dispatch(app, web_root, self.command, self.path,
+                              {key.lower(): value for key, value in self.headers.items()}, self.rfile)
+            status, headers, raw = response(*result)
             self.send_response(status)
-            self.send_header('Content-Type', content_type)
-            self.send_header('Content-Length', str(len(raw)))
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
-            self.send_header('Referrer-Policy', 'no-referrer')
+            for key, value in headers:
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(raw)
 
-        def do_GET(self):
-            try:
-                parsed = urlsplit(self.path)
-                if parsed.path == '/api/dashboard':
-                    return self.send_data(200, app.dashboard())
-                if parsed.path == '/api/history':
-                    query = parse_qs(parsed.query, strict_parsing=True)
-                    station = query.get('station_id', [''])[0]
-                    hours = int(query.get('hours', ['48'])[0])
-                    if station not in app.station_ids or not 1 <= hours <= 168:
-                        return self.send_data(400, {'error': 'Known station and hours between 1 and 168 required'})
-                    return self.send_data(200, {'station_id': station, 'hours': hours, 'history': app.store.history(station, datetime.now(timezone.utc)-timedelta(hours=hours))})
-                if parsed.path.startswith('/api/'):
-                    return self.send_data(404, {'error': 'Not found'})
-                relative = unquote(parsed.path).lstrip('/') or 'index.html'
-                path = root / relative
-                if '..' in Path(relative).parts or any(p.is_symlink() for p in [path, *path.parents]) or not path.resolve().is_relative_to(root) or not path.is_file():
-                    return self.send_data(404, {'error': 'Not found'})
-                return self.send_data(200, path.read_bytes(), mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
-            except (ValueError, TypeError):
-                self.send_data(400, {'error': 'Invalid request'})
-            except Exception:
-                self.send_data(503, {'error': 'Weather service unavailable'})
-
-        def do_POST(self):
-            self.close_connection = True
-            try:
-                if urlsplit(self.path).path != '/api/ingest/rtl433':
-                    return self.send_data(404, {'error': 'Not found'})
-                if not app.allow_ingest or not app.token:
-                    return self.send_data(403, {'error': 'Ingestion is disabled'})
-                supplied = self.headers.get('Authorization', '')
-                if not hmac.compare_digest(supplied.encode(), ('Bearer ' + app.token).encode()):
-                    return self.send_data(401, {'error': 'Unauthorized'})
-                if self.headers.get('Transfer-Encoding') or self.headers.get_content_type() != 'application/json':
-                    return self.send_data(400, {'error': 'JSON with Content-Length required'})
-                length = int(self.headers.get('Content-Length', '0'))
-                if not 1 <= length <= 16384:
-                    return self.send_data(413, {'error': 'Body must be between 1 and 16384 bytes'})
-                raw = self.rfile.read(length)
-                if len(raw) != length:
-                    return self.send_data(400, {'error': 'Incomplete body'})
-                packet = json.loads(raw)
-                if not isinstance(packet, dict):
-                    raise ValueError('Packet object required')
-                return self.send_data(200, app.ingest(packet))
-            except (ValueError, TypeError, UnicodeError):
-                self.send_data(400, {'error': 'Invalid sensor packet or station identity'})
-            except (socket.timeout, TimeoutError):
-                self.send_data(408, {'error': 'Request timed out'})
-            except Exception:
-                self.send_data(503, {'error': 'Weather service unavailable'})
+        do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = handle_request
     return Handler
 
 

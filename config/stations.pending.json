@@ -1,0 +1,21 @@
+{
+  "locations": [
+    {
+      "id": "lakehouse",
+      "name": "Lakehouse",
+      "timezone": "America/New_York",
+      "latitude": null,
+      "longitude": null,
+      "stations": [
+        {
+          "id": "lakehouse-ws2000",
+          "name": "Ambient WS-2000 outdoor array",
+          "model": "Ambient Weather WS-2000 / WH65B",
+          "receiver_model": "Fineoffset-WH65B",
+          "sensor_id": "PENDING_RF_COMMISSIONING",
+          "ingest_enabled": false
+        }
+      ]
+    }
+  ]
+}

@@ -10,7 +10,8 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.2.10,<3.4"]
+postgres = ["psycopg[binary]==3.3.6"]
+serve = ["gunicorn==26.2.0"]
 
 [tool.setuptools]
 packages = ["weather"]

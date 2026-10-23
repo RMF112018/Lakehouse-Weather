@@ -24,7 +24,7 @@ PostgreSQL integration is separately opt-in against a verified disposable target
 
 One Python application serves a same-origin, no-build HTML/CSS/JavaScript interface. A dedicated weather runtime uses only `weather` relations in the existing logical `my_pa` PostgreSQL database. The application never creates a database, applies schema changes or reuses my-pa owner credentials. Open-Meteo refresh is server-side and explicit; demo forecasts are synthetic.
 
-Local default binds loopback. NAS hosting, authentication, owner-managed Alembic migration, a dedicated role, live RF commissioning and existing Cloudflare routing remain controlled operations. The requested public route is `https://www.bobby-fetting.me/weather/`; no route has been activated. Browser assets/API calls are relative to support a reviewed prefix-stripping proxy.
+Local development binds loopback. The production candidate uses hash-locked Gunicorn, protected secret-file inputs, dedicated dashboard/forecast roles, scheduled bounded forecast work and additive NAS services. NAS/database/routing activation follows exact-source review and target checks; RF commissioning remains pending. The requested public route is `https://www.bobby-fetting.me/weather/`; no route has been activated. Browser assets/API calls are relative to support a reviewed prefix-stripping proxy.
 
 The new objective supersedes the earlier SQLite/WeeWX-only and RF-before-all-application-work plan. [ADR-0002](docs/adr/0002-multi-location-postgresql-dashboard.md) explains alternatives. [Architecture](docs/ARCHITECTURE.md) defines the boundary.
 
@@ -37,8 +37,10 @@ The new objective supersedes the earlier SQLite/WeeWX-only and RF-before-all-app
 | `compose.dashboard.yaml` | Nonproduction container candidate; demo default, optional explicit PostgreSQL overlay, no database or tunnel |
 | `compose.yaml`, `docker/weewx/`, RF runbooks | Preserved hardware/WeeWX scaffold; not the new dashboard launcher |
 
-The container candidate has not been deployed. Its Python base is digest-pinned and PostgreSQL dependency versions are exact; NAS admission still needs image/platform and dependency review. Existing `make up`, backup and health scripts target the legacy WeeWX scaffold; they are not PostgreSQL operational procedures.
+The Python base is digest-pinned and the Python 3.12 amd64 dependency closure is hash-locked. See ADR-0003 and the NAS operations runbook for additive deployment, role isolation, recovery and authentication requirements. Deployment status belongs in the separately delivered runtime evidence, not this source document. Existing `make up`, backup and health scripts target the legacy WeeWX scaffold; they are not PostgreSQL operational procedures.
 
 ## License
 
 Integration code remains GPL-3.0-only. Existing upstream pins/provenance are retained in `UPSTREAMS.lock` and `docs/upstreams/README.md`. No upstream source is vendored into the new application.
+
+[ADR-0003](docs/adr/0003-additive-nas-runtime-and-owner-bound-storage.md) records the authorized production-readiness decisions and [NAS operations](docs/runbooks/nas-weather-operations.md) describes the controlled runtime workflow. `config/stations.pending.json` is generic and disables RF ingestion; private runtime coordinates and credentials are never source artifacts.

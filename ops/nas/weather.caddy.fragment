@@ -1,0 +1,26 @@
+# INERT REVIEW FRAGMENT: insert inside the existing www.bobby-fetting.me site
+# only AFTER Cloudflare Access protects /weather and /weather/* and direct
+# origin access is denied. Keep existing /pa handlers. Never import blindly.
+@weather_redirect {
+    method GET
+    path /weather
+}
+redir @weather_redirect /weather/ 308
+@weather_read {
+    method GET
+    path /weather/ /weather/index.html /weather/app.js /weather/style.css /weather/icon.svg /weather/manifest.webmanifest /weather/api/dashboard /weather/api/history
+}
+handle @weather_read {
+    uri strip_prefix /weather
+    reverse_proxy weather-dashboard:8765 {
+        transport http {
+            dial_timeout 3s
+            response_header_timeout 15s
+        }
+    }
+}
+# Reject every other weather path/method, including health, ready and ingestion.
+@weather_other path /weather /weather/*
+handle @weather_other {
+    respond 404
+}
