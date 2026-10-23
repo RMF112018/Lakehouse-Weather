@@ -74,12 +74,38 @@ class IngressTests(unittest.TestCase):
     def test_apply_failure_attempts_exact_original_rollback(self):
         reviewed = ingress.digest(HELPER.read_bytes())
         record = {'fixture': 'metadata-only'}
-        with tempfile.TemporaryDirectory() as folder, patch.object(ingress, 'ROOT', Path(folder)), patch.object(ingress.os, 'geteuid', return_value=0), patch.object(ingress, 'identities'), patch.object(ingress, 'manifest', return_value=record), patch.object(ingress, 'unchanged'), patch.object(ingress, 'validate'), patch.object(ingress, 'activate', side_effect=[ValueError('fixture failed'), None]) as activate:
+        with tempfile.TemporaryDirectory() as folder, patch.object(ingress, 'ROOT', Path(folder)), patch.object(ingress.os, 'geteuid', return_value=0), patch.object(ingress, 'identities'), patch.object(ingress, 'manifest', return_value=record), patch.object(ingress, 'unchanged'), patch.object(ingress, 'validate'), patch.object(ingress, 'activate', side_effect=ValueError('fixture failed')) as activate, patch.object(ingress, 'rollback_original') as rollback:
             (Path(folder) / 'validated').touch()
             with self.assertRaisesRegex(ValueError, 'original configurations restored'):
                 ingress.main(['apply', '--reviewed-helper-sha', reviewed])
             self.assertEqual(activate.call_args_list[0].args, (record, 'candidate'))
-            self.assertEqual(activate.call_args_list[1].args, (record, 'original'))
+            rollback.assert_called_once_with(record)
+
+
+    def test_rollback_admits_stopped_exact_identities_and_mixed_known_files(self):
+        reviewed = ingress.digest(HELPER.read_bytes())
+        record = {'fixture': 'metadata-only'}
+        with tempfile.TemporaryDirectory() as folder, patch.object(ingress, 'ROOT', Path(folder)), patch.object(ingress.os, 'geteuid', return_value=0), patch.object(ingress, 'identities') as identities, patch.object(ingress, 'manifest', return_value=record), patch.object(ingress, 'unchanged') as unchanged, patch.object(ingress, 'rollback_original') as rollback, contextlib.redirect_stdout(io.StringIO()):
+            (Path(folder) / 'validated').touch()
+            self.assertEqual(ingress.main(['rollback', '--reviewed-helper-sha', reviewed]), 0)
+            identities.assert_called_once_with(require_running=False)
+            unchanged.assert_called_once_with(record, 'either')
+            rollback.assert_called_once_with(record)
+
+    def test_restore_files_attempts_both_after_one_failure(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(ingress, 'ROOT', Path(folder)), patch.object(ingress, 'in_place', side_effect=[OSError('fixture denied'), None]) as write, patch.object(ingress, 'mounted_bytes', return_value='fixture'):
+            for key in ingress.FILES: (Path(folder) / (key + '.original')).write_bytes(b'fixture')
+            with self.assertRaises(ValueError): ingress.write_files({key: {'original': 'fixture'} for key in ingress.FILES}, 'original')
+            self.assertEqual(write.call_count, 2)
+
+    def test_stopped_proxy_restore_reports_runtime_incomplete_and_restarts_only_connector(self):
+        record = {'fixture': 'metadata-only'}
+        with patch.object(ingress, 'write_files') as write, patch.object(ingress, 'inspect', return_value='exited'), patch.object(ingress, 'command', return_value=b'') as command, patch.object(ingress, 'identities') as identities, contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(ValueError): ingress.rollback_original(record)
+            write.assert_called_once_with(record, 'original')
+            self.assertIn('files_restored=true runtime_recovered=false', output.getvalue())
+            command.assert_called_once_with([ingress.DOCKER, 'restart', '--time', '30', ingress.CONNECTOR])
+            identities.assert_called_once_with(require_running=False)
 
     def test_native_python38_compatible(self):
         ast.parse(HELPER.read_text(), feature_version=(3,8))

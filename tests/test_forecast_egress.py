@@ -52,6 +52,10 @@ class EgressTests(unittest.TestCase):
   with patch.object(egress.os,'geteuid',return_value=0),patch.object(egress,'authenticate') as auth,patch.object(egress,'secure_path'),patch.object(egress.Path,'resolve',return_value=egress.DEPLOYED),patch.object(egress.Path,'exists',return_value=False),patch.object(egress.Path,'is_symlink',return_value=False):
    egress.cron_install(True)
    auth.assert_not_called()
+ def test_commands_are_bounded(self):
+  with patch.object(egress.subprocess,'run',return_value=types.SimpleNamespace(returncode=0)) as run:
+   egress.run(['/bin/true'])
+   self.assertEqual(run.call_args.kwargs['timeout'],15)
  def test_dedicated_cron(self):
   self.assertEqual(str(egress.CRON),'/etc/cron.d/weather-forecast-egress')
   self.assertIn('/usr/bin/python3 -I ',egress.CRON_CONTENT)

@@ -41,9 +41,9 @@ def inspect(name, expression):
     return command([DOCKER, 'inspect', '--format', expression, name]).decode().strip()
 
 
-def identities():
+def identities(require_running=True):
     for name, (container_id, image) in CONTAINERS.items():
-        if inspect(name, '{{.Id}}') != container_id or inspect(name, '{{.Image}}') != image or inspect(name, '{{.State.Status}}') != 'running':
+        if inspect(name, '{{.Id}}') != container_id or inspect(name, '{{.Image}}') != image or (require_running and inspect(name, '{{.State.Status}}') != 'running'):
             raise ValueError('Ingress container identity/state drift')
     for key, (path, inode, uid, mode) in FILES.items():
         meta = path.lstat()
@@ -109,7 +109,8 @@ def manifest():
 
 def unchanged(record, suffix):
     for key, (path, _, _, _) in FILES.items():
-        if digest(path.read_bytes()) != record[key][suffix]:
+        expected = {record[key]['original'], record[key]['candidate']} if suffix == 'either' else {record[key][suffix]}
+        if digest(path.read_bytes()) not in expected:
             raise ValueError('Ingress content drift; no overwrite performed')
         if digest((ROOT / (key + '.original')).read_bytes()) != record[key]['original'] or digest((ROOT / (key + '.candidate')).read_bytes()) != record[key]['candidate']:
             raise ValueError('Ingress backup/candidate drift')
@@ -132,21 +133,76 @@ def in_place(path, data):
 
 
 def mounted_bytes(key):
-    # Read inside the existing container and print only a digest internally.
-    if key == 'caddy':
-        return command([DOCKER, 'exec', PROXY, 'sha256sum', '/etc/caddy/Caddyfile']).decode().split()[0]
-    return command([DOCKER, 'run', '--rm', '--network', 'none', '--read-only', '--volumes-from', CONNECTOR + ':ro', '--entrypoint', 'sha256sum', CONTAINERS[PROXY][1], '/etc/cloudflared/config.yml']).decode().split()[0]
+    # A stopped original container still defines its immutable bind mounts.
+    # Use the known Caddy image's checksum utility, never emit file contents.
+    owner = PROXY if key == 'caddy' else CONNECTOR
+    destination = '/etc/caddy/Caddyfile' if key == 'caddy' else '/etc/cloudflared/config.yml'
+    return command([DOCKER, 'run', '--rm', '--network', 'none', '--read-only', '--volumes-from', owner + ':ro', '--entrypoint', 'sha256sum', CONTAINERS[PROXY][1], destination]).decode().split()[0]
+
+
+def write_files(record, suffix):
+    failures = []
+    # Attempt both restores even if one file fails. Keep the original inode.
+    for key, (path, _, _, _) in FILES.items():
+        try:
+            in_place(path, (ROOT / (key + '.' + suffix)).read_bytes())
+        except Exception:
+            failures.append(key)
+    for key in FILES:
+        try:
+            if mounted_bytes(key) != record[key][suffix]:
+                failures.append(key)
+        except Exception:
+            failures.append(key)
+    if failures:
+        raise ValueError('Ingress file or bind verification incomplete')
+
+
+def recover_runtime():
+    failures = []
+    try:
+        if inspect(PROXY, '{{.State.Status}}') != 'running':
+            raise ValueError('Stopped proxy needs separate operator recovery')
+        command([DOCKER, 'exec', PROXY, 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'])
+    except Exception:
+        failures.append('proxy')
+    # The single connector restart is authorized and must still be attempted
+    # when the proxy reload fails. No other service is restarted.
+    try:
+        command([DOCKER, 'restart', '--time', '30', CONNECTOR])
+    except Exception:
+        failures.append('connector')
+    identities(require_running=False)
+    for name in (PROXY, CONNECTOR):
+        if inspect(name, '{{.State.Status}}') != 'running':
+            failures.append('not-running')
+    if failures:
+        raise ValueError('Ingress runtime recovery incomplete')
 
 
 def activate(record, suffix):
-    for key, (path, _, _, _) in FILES.items():
-        in_place(path, (ROOT / (key + '.' + suffix)).read_bytes())
-    for key in FILES:
-        if mounted_bytes(key) != record[key][suffix]:
-            raise ValueError('Running bind mount does not see approved bytes')
-    command([DOCKER, 'exec', PROXY, 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'])
-    command([DOCKER, 'restart', '--time', '30', CONNECTOR])
-    identities()
+    write_files(record, suffix)
+    recover_runtime()
+
+
+def rollback_original(record):
+    files_ok, runtime_ok = False, False
+    try:
+        write_files(record, 'original')
+        files_ok = True
+    except Exception:
+        pass
+    # Report file restoration separately from runtime recovery. An exited proxy
+    # cannot be reloaded; do not imply it recovered or restart it implicitly.
+    if files_ok:
+        try:
+            recover_runtime()
+            runtime_ok = True
+        except Exception:
+            pass
+    print('Rollback files_restored=' + str(files_ok).lower() + ' runtime_recovered=' + str(runtime_ok).lower())
+    if not (files_ok and runtime_ok):
+        raise ValueError('Original ingress recovery incomplete; protected originals retained')
 
 
 def main(argv=None):
@@ -156,7 +212,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if os.geteuid() != 0 or digest(Path(__file__).read_bytes()) != args.reviewed_helper_sha:
         raise ValueError('Reviewed helper identity and root execution required')
-    identities()
+    identities(require_running=args.action != 'rollback')
     if args.action == 'prepare':
         if ROOT.exists():
             raise ValueError('Ingress preparation directory already exists')
@@ -185,12 +241,12 @@ def main(argv=None):
         try:
             activate(record, 'candidate')
         except Exception:
-            activate(record, 'original')
+            rollback_original(record)
             raise ValueError('Ingress activation failed; original configurations restored')
         print('Weather-only ingress activated; proxy reloaded and one connector restarted')
     else:
-        unchanged(record, 'candidate')
-        activate(record, 'original')
+        unchanged(record, 'either')
+        rollback_original(record)
         print('Weather ingress rolled back; original pa configurations restored')
     return 0
 

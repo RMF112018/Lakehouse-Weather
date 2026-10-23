@@ -29,7 +29,7 @@ CRON_CONTENT = '*/5 * * * * root /usr/bin/python3 -I /volume1/weather-dashboard/
 
 
 def run(argv, check=True):
-    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=15)
     if check and result.returncode:
         raise RuntimeError('Bounded network command failed')
     return result
