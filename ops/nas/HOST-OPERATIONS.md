@@ -25,8 +25,9 @@ Install the reviewed helper as root-owned mode 0500 at
 `/volume1/weather-dashboard/operations/forecast_egress.py` inside root-owned mode
 0700 `operations`. `--apply` reconciles the three rules. `--apply --remove` removes
 all exact owned tuples even after container or firewall drift. Admission drift
-also revokes those tuples and records failure. Unknown marked rules are never
-silently adopted or removed. Operator changes require a new reviewed binding.
+also revokes those tuples and records failure. The NAS lacks the optional iptables comment match. Ownership therefore uses
+the complete bridge/source/WAN/protocol/port tuple; all other rules remain
+subject to the frozen baseline hash and are never adopted or removed. Operator changes require a new reviewed binding.
 
 `--apply --install-cron` creates only its unique root-owned mode 0600
 `/etc/cron.d/weather-forecast-egress`; it never rewrites existing crontabs. The

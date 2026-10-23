@@ -12,7 +12,7 @@ class EgressTests(unittest.TestCase):
   for rule in rules:
    self.assertIn('172.28.0.2/32',rule); self.assertIn(egress.BRIDGE,rule); self.assertIn(egress.WAN,rule)
    self.assertEqual(rule[-1],'RETURN'); self.assertNotIn('ACCEPT',rule)
-   self.assertTrue(rule[rule.index('--comment')+1].startswith(egress.MARKER))
+   self.assertNotIn('comment',rule); self.assertEqual(rule.count('-m'),1)
   self.assertEqual({(r[r.index('-p')+1],r[r.index('--dport')+1]) for r in rules},{('tcp','443'),('tcp','53'),('udp','53')})
  def test_idempotent(self):
   calls=[]

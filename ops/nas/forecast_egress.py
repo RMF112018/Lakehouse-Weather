@@ -60,10 +60,10 @@ def authenticate():
         raise RuntimeError('WAN interface drift')
     policy = run([IPTABLES, '-S', CHAIN]).stdout
     expected = {tuple(['-A', CHAIN] + rule) for rule in rules()}
-    for line in policy.splitlines():
-        if MARKER in line and tuple(shlex.split(line)) not in expected:
-            raise RuntimeError('Unknown weather-marked rule')
-    baseline = ''.join(line + '\n' for line in policy.splitlines() if MARKER not in line)
+    # The NAS lacks xt_comment. Ownership is the complete exact rule tuple,
+    # including this exclusive bridge, source /32 and WAN interface.
+    baseline = ''.join(line + '\n' for line in policy.splitlines()
+                       if tuple(shlex.split(line)) not in expected)
     if hashlib.sha256(baseline.encode()).hexdigest() != '545cbe27225a6bd1571b5e5436e153fd68ab63648e265fe7898251646f6b589a':
         raise RuntimeError('Firewall baseline drift; operator review required')
     if '-j DROP' not in policy:
@@ -71,9 +71,8 @@ def authenticate():
 
 
 def rules():
-    return [['-i', BRIDGE, '-o', WAN, '-s', SOURCE, '-p', protocol,
-             '--dport', port, '-m', 'comment', '--comment', MARKER + '-' + protocol + '-' + port,
-             '-j', 'RETURN'] for protocol, port in [('tcp', '443'), ('udp', '53'), ('tcp', '53')]]
+    return [['-i', BRIDGE, '-o', WAN, '-s', SOURCE, '-p', protocol, '-m', protocol,
+             '--dport', port, '-j', 'RETURN'] for protocol, port in [('tcp', '443'), ('udp', '53'), ('tcp', '53')]]
 
 
 def reconcile(remove=False):
