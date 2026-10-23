@@ -168,3 +168,34 @@ class PostgresIntegrationTests(unittest.TestCase):
         with store.connection() as conn:
             grants = conn.execute("SELECT has_schema_privilege(current_user,'public','CREATE'), has_schema_privilege(current_user,'weather','CREATE')").fetchone()
             self.assertEqual(grants, (False, False))
+
+
+class ForwardTests(unittest.TestCase):
+    def run_stream(self, outcomes):
+        from types import SimpleNamespace
+        from unittest.mock import patch, Mock
+        from weather.__main__ import main
+        stream = io.BytesIO(b'{"model":"neighbor","id":123}\n{"model":"DEMO","id":"0-0"}\n')
+        opener = Mock()
+        opener.open.side_effect = outcomes
+        stderr = io.StringIO()
+        with patch('weather.__main__.build_opener', return_value=opener), patch('weather.__main__.sys.argv', ['weather', 'forward']), patch('weather.__main__.sys.stdin', SimpleNamespace(buffer=stream)), patch('weather.__main__.sys.stderr', stderr), patch.dict(os.environ, {'WEATHER_INGEST_TOKEN': 'x'*32}):
+            result = main()
+        self.assertNotIn('neighbor', stderr.getvalue())
+        self.assertNotIn('x'*32, stderr.getvalue())
+        return result, opener
+
+    def test_unknown_rejection_continues_to_valid_packet(self):
+        error = HTTPError('http://localhost/api/ingest/rtl433', 400, 'synthetic rejection', {}, io.BytesIO(b''))
+        result, opener = self.run_stream([error, io.BytesIO(b'{"inserted":true}')])
+        self.assertEqual(result, 0)
+        self.assertEqual(opener.open.call_count, 2)
+        accepted_request = opener.open.call_args_list[1].args[0]
+        self.assertEqual(json.loads(accepted_request.data)['id'], '0-0')
+
+    def test_auth_and_transport_failure_stop_stream(self):
+        for failure in [HTTPError('http://localhost/api/ingest/rtl433', 401, 'synthetic denied', {}, io.BytesIO(b'')), OSError('synthetic transport failure')]:
+            with self.subTest(failure=type(failure).__name__):
+                result, opener = self.run_stream([failure])
+                self.assertEqual(result, 1)
+                self.assertEqual(opener.open.call_count, 1)

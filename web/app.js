@@ -17,6 +17,13 @@
     try { return new Intl.DateTimeFormat(undefined, { ...options, timeZone: timezone || 'UTC' }).format(new Date(value)); }
     catch (_) { return new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' }).format(new Date(value)); }
   }
+  function localCalendarDate(timezone) {
+    let parts;
+    try { parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); }
+    catch (_) { parts = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); }
+    const part = type => parts.find(item => item.type === type).value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  }
   function age(value) {
     const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
     if (!Number.isFinite(minutes)) return 'Time unavailable';
@@ -105,9 +112,10 @@
     const station = state.station; const obs = station?.observation || {}; const forecast = state.location.forecast;
     set('updated', obs.observed_at ? `Observed ${formatDate(obs.observed_at, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · ${age(obs.observed_at)}` : 'Waiting for the first observation');
     const temperature = node('span', '', temp(obs.temperature_c)); temperature.append(node('small', '', `°${state.unit}`)); $('temperature').replaceChildren(temperature);
-    const currentWeather = weather(forecast?.daily?.[0]?.weather_code);
+    const today = forecast?.daily?.find(day => day.date === localCalendarDate(state.location.timezone));
+    const currentWeather = weather(today?.weather_code);
     set('condition-label', finite(obs.temperature_c) ? 'Outside, right now' : 'Awaiting station data');
-    set('hero-detail', forecast?.daily?.length ? `Today’s forecast: ${currentWeather.label.toLowerCase()}` : 'Local measurements from your weather station');
+    set('hero-detail', today ? `Today’s forecast: ${currentWeather.label.toLowerCase()}` : 'Local measurements from your weather station');
     $('hero-icon').replaceChildren(icon(currentWeather.icon));
     set('station-health', !station ? 'No station' : station.stale ? '● Stale reading' : '● Station reporting'); $('station-health').classList.toggle('stale', !station || station.stale);
     set('station-model', station ? `${station.model || 'Weather station'} · ${station.name}` : 'No station configured');
@@ -161,7 +169,8 @@
     set('forecast-source', forecast?.source ? `Forecast · ${forecast.source}` : 'Forecast unavailable');
     set('forecast-note', forecast?.fetched_at ? `Forecast updated ${formatDate(forecast.fetched_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}${forecast.status && !['ok', 'available', 'demo', 'fresh'].includes(forecast.status) ? ` · ${forecast.status}` : ''}. Forecasts describe the wider area; your station measures conditions at home.` : 'Forecasts will appear when a forecast provider is configured.');
     if (!forecast?.daily?.length) { $('forecast').append(node('p', 'empty', 'No forecast is available for this location.')); return; }
-    for (const [index, day] of forecast.daily.slice(0, 7).entries()) { const cell = node('article', 'forecast-day'); const description = weather(day.weather_code); const date = `${day.date}T12:00:00Z`; const image = icon(description.icon); const descriptionNode = document.createElementNS('http://www.w3.org/2000/svg', 'title'); descriptionNode.textContent = description.label; image.prepend(descriptionNode); image.removeAttribute('aria-hidden'); image.setAttribute('role', 'img'); image.setAttribute('aria-label', description.label); const temperatures = node('div', 'forecast-temps', `${temp(day.temperature_max_c)}°`); temperatures.append(node('span', '', `${temp(day.temperature_min_c)}°`)); cell.append(node('span', 'day', index === 0 ? 'Today' : formatDate(date, { weekday: 'short' }, 'UTC')), node('span', 'date', formatDate(date, { month: 'short', day: 'numeric' }, 'UTC')), image, temperatures, node('span', 'rain-chance', `${number(day.precipitation_probability_pct)}% rain`)); $('forecast').append(cell); }
+    const today = localCalendarDate(state.location.timezone);
+    for (const day of forecast.daily.slice(0, 7)) { const cell = node('article', 'forecast-day'); const description = weather(day.weather_code); const date = `${day.date}T12:00:00Z`; const image = icon(description.icon); const descriptionNode = document.createElementNS('http://www.w3.org/2000/svg', 'title'); descriptionNode.textContent = description.label; image.prepend(descriptionNode); image.removeAttribute('aria-hidden'); image.setAttribute('role', 'img'); image.setAttribute('aria-label', description.label); const temperatures = node('div', 'forecast-temps', `${temp(day.temperature_max_c)}°`); temperatures.append(node('span', '', `${temp(day.temperature_min_c)}°`)); cell.append(node('span', 'day', day.date === today ? 'Today' : formatDate(date, { weekday: 'short' }, 'UTC')), node('span', 'date', formatDate(date, { month: 'short', day: 'numeric' }, 'UTC')), image, temperatures, node('span', 'rain-chance', `${number(day.precipitation_probability_pct)}% rain`)); $('forecast').append(cell); }
   }
   $('refresh').addEventListener('click', refresh);
   $('station-select').addEventListener('change', event => { chooseStation(state.location.stations.find(s => String(s.id) === event.target.value)); });

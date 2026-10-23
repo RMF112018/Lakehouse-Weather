@@ -3,6 +3,8 @@
 # Assumes an operator-defined upstream named weather_dashboard (no DB access).
 # This does not configure Cloudflare, auth, TLS, firewall or NAS placement.
 location = /weather {
+    # Keep the public scheme/port when TLS terminates at the existing tunnel.
+    absolute_redirect off;
     return 308 /weather/;
 }
 location = /weather/ {

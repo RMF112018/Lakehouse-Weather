@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from . import demo, forecast, registry
 from .server import Application, Server, handler
@@ -72,6 +73,14 @@ def main():
                 try:
                     with build_opener(NoRedirect).open(request, timeout=10) as response:
                         response.read(4096)
+                except HTTPError as error:
+                    status = error.code
+                    error.close()
+                    if status == 400:
+                        print('Receiver packet rejected; continuing stream', file=sys.stderr)
+                        continue
+                    print('Receiver delivery failed; packet not acknowledged', file=sys.stderr)
+                    return 1
                 except OSError:
                     print('Receiver delivery failed; packet not acknowledged', file=sys.stderr)
                     return 1
