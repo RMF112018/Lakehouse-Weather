@@ -1,6 +1,6 @@
 # Multi-location Lakehouse Weather — Planning Package Index
-**Plan ID:** LHW-ML-20261023 | **Revision:** 1.0 CR-1 (corrected planning review candidate) | **Date:** 2026-10-23
-**Disposition:** CR-1_CORRECTED_CANDIDATE / FRESH_INDEPENDENT_EXACT_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_OR_DEPLOYMENT
+**Plan ID:** LHW-ML-20261023 | **Revision:** 1.1 CR-2 (operator-authorized documentary corrective candidate) | **Date:** 2026-10-23
+**Disposition:** CR-2_CORRECTIVE_CANDIDATE / FRESH_INDEPENDENT_NEW_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_OR_DEPLOYMENT
 **Scope:** implementation-ready plan for one NAS RF receiver (local Ambient WH65B + optional WH32B), many distinct API-sourced locations, shared existing my-pa PostgreSQL, source-aware iPhone dashboard. Source files from main remain unchanged.
 
 ## Start here
@@ -53,3 +53,8 @@ This branch is **planning documentation only**. Approval by an independent plann
 The first independent review `LHW-INDEPENDENT-PLAN-REVIEW-20261023-001` found `PLAN_REVISION_REQUIRED` against prior HEAD `78a33161e38dce7adb2476e74488f18ccd6ad01f`, tree `782327104e71ef144410285eafc534e75c3470b6`. The current candidate documents corrections to `LHW-RV-001..007` (major) and `LHW-RV-008..010` (minor), preserving all F/D/RSK/U/WP/AT/SC identifiers. See [11 corrective findings](11_RISK_AND_DECISION_REGISTER.md), [03 signed RF protocol](03_TARGET_ARCHITECTURE.md), [04 DB key/retention/roles](04_POSTGRESQL_INTEGRATION.md), [05 model/derived semantics](05_WEATHER_DATA_MODEL.md), [09 acceptance](09_VALIDATION_AND_ACCEPTANCE.md) and [10 revised 73–132d provisional effort](10_IMPLEMENTATION_WORK_PACKAGES.md).
 
 **A fresh reviewer independent of the correction author must review the actual new Git HEAD/tree; no model self-approval.** All live gates, my-pa DB ownership, hardware, credentials, provider terms, activation, production and merge remain separately blocked. The unchanged 16-filename package is documentation only, and historical checkpoint commits remain evidence, not current approval.
+
+
+## CR-2 corrective lineage and independent review requirement
+
+Rereview `LHW-CR1-INDEPENDENT-REREVIEW-20261023-001` returned `PLAN_REVISION_REQUIRED` at prior CR-1 commit `e048d5de85afc8d275ea258a3db8aeb45b67f360` / tree `76b7ca604ab1f3e325b7853f4be14c2fb97b533f`, with RR2-001..008. An operator-authorized **planning Markdown only** successor corrects the RF 200/207 cases, same-device and model-event FK, rolling provider stream/semantic digest, nonce lifecycle, offline/retention wording and AT-026 identifier. Details and owners: [11 §CR-2](11_RISK_AND_DECISION_REGISTER.md); binding contracts [03](03_TARGET_ARCHITECTURE.md), [04](04_POSTGRESQL_INTEGRATION.md), [05](05_WEATHER_DATA_MODEL.md), [06](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09](09_VALIDATION_AND_ACCEPTANCE.md), [10](10_IMPLEMENTATION_WORK_PACKAGES.md). The exact **new** commit/tree must be authenticated from GitHub after publishing; this README deliberately does not guess its self-referential commit. Prior reviews remain historical only. The new corrective plan remains **NOT_APPROVED** pending a **different eligible independent reviewer**, with all my-pa, NAS/RF, providers, iPhone, production/merge/deletion/risk gates closed.

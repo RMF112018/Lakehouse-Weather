@@ -1,5 +1,5 @@
 # 11 — Risks, decisions, findings, open dependencies
-**Package:** LHW-ML-20261023 | **Checkpoint CP-2** | **Status:** CORRECTIVE PLAN CANDIDATE / INDEPENDENT EXACT-HEAD REREVIEW REQUIRED. Previous report: `PLAN_REVISION_REQUIRED` at `78a33161e38dce7adb2476e74488f18ccd6ad01f`. This register never substitutes for operator approval, my-pa governance, RF evidence or runtime verification.
+**Package:** LHW-ML-20261023 | **Checkpoint CP-2 / CR-2** | **Status:** SECOND DOCUMENTARY CORRECTIVE CANDIDATE / FRESH INDEPENDENT NEW-HEAD REVIEW REQUIRED. Original review at `78a33161e38dce7adb2476e74488f18ccd6ad01f`; CR-1 rereview `LHW-CR1-INDEPENDENT-REREVIEW-20261023-001` found `PLAN_REVISION_REQUIRED` at `e048d5de85afc8d275ea258a3db8aeb45b67f360` / `76b7ca604ab1f3e325b7853f4be14c2fb97b533f`. This register neither self-approves CR-2 nor creates operator/my-pa/live authority.
 
 ## Decision register
 | ID | Decision | Rationale/status | Work packages | Acceptance |
@@ -94,3 +94,21 @@ Source report: `LHW-INDEPENDENT-PLAN-REVIEW-20261023-001`, previous HEAD `78a331
 | LHW-RV-010 MINOR | Static-only PWA cache, API no-store; tailnet revocation cannot erase existing local data | WP-009/010 | AT-017/020/022 | CORRECTED_IN_PLAN; device proof future |
 
 Binding details: [03 transport](03_TARGET_ARCHITECTURE.md), [04 PostgreSQL §7](04_POSTGRESQL_INTEGRATION.md), [05 source/weather model](05_WEATHER_DATA_MODEL.md), [06 RF/providers](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09 acceptance §7](09_VALIDATION_AND_ACCEPTANCE.md), [10 WPs](10_IMPLEMENTATION_WORK_PACKAGES.md). Each correction is a proposed design, **not** implementation evidence. Original risks RSK-001..RSK-016 and unknowns U-001..U-010 remain open to future gates; fresh independent plan review is required at the new HEAD/tree. No application code, database, NAS, credentials, public ingress, merge, deployment, deletion or risk acceptance is authorized.
+
+
+## CR-2 — Independent rereview residuals and corrective ownership (NOT SELF-APPROVED)
+
+**Source:** `LHW-CR1-INDEPENDENT-REREVIEW-20261023-001`, disposition `PLAN_REVISION_REQUIRED` against **previous** corrected commit `e048d5de85afc8d275ea258a3db8aeb45b67f360` and tree `76b7ca604ab1f3e325b7853f4be14c2fb97b533f`. The review was adversarial to CR-1 and surfaced new `RR2-001..008`. The following table records **corrective specifications proposed in this CR-2 planning revision**, not an independent closure determination. Preserve all original F/D/RSK/U/WP/AT/SC/I identities.
+
+| Review finding | Severity | CR-2 binding correction | Decision / risk | Future WP and executable AT |
+|---|---|---|---|---|
+| RR2-001 | MAJOR | One `rf-batch.v1` status law: 200 iff all committed/duplicates; 207 for any complete batch with terminal/conflict/retryable (including homogeneous all-negative); whole-batch 400/413/401/403/429/503 before any member, no blanket 409; durable exact terminal receipt | D-003/008, RSK-008/010 | WP-005/006/010/011 → AT-009/010/022/025/027 |
+| RR2-002 | MAJOR | DB-source-kind physical observation same-event same-device FK; null-safe remote guard; same-station WH65B/WH32B negative and deterministic retirement locks | D-001/004/008, RSK-001/003/005 | WP-004/005 → AT-007/011/014; SC-01/04, I-01/02/05/06 |
+| RR2-003 | MAJOR | Every model run links by source/stream-checked RESTRICT composite FK to immutable raw provider retrieval event metadata; payload-only expiry preserves model provenance | D-001/004/009, RSK-001/011 | WP-004/005/007/012 → AT-011/013/019, I-04/11/12 |
+| RR2-004 | MAJOR | Stream key immutable across rolling absolute poll windows; separate versioned semantic digest from full raw digest; no false Best Match issue timestamp | D-004/005/008, RSK-005/006/010/015 | WP-004/005/007 → AT-013/016/018/027, SC-02/05 |
+| RR2-005 | MINOR mandatory | Atomic unique nonce admission before members; ±120s freshness, >=300s persistence; authorized operational-only expiry, not app DELETE/weather purge | D-003/006/008, RSK-001/007/008 | WP-004/006/010/012 → AT-010/011/022/023/025 |
+| RR2-006 | MINOR mandatory | Replace old “raw-event 30–90d” claim with optional short-lived payload bytes; metadata lives while referenced | D-009, RSK-011/013 | WP-004/005/012 → AT-019/023 |
+| RR2-007 | MINOR mandatory | Fresh offline cold start has no weather data; already-open tab may show OFFLINE in-memory as-of; SC-05 dual independent stream recovery | D-005/006/010, RSK-010/012 | WP-007/009/010 → AT-017/018/020/022 |
+| RR2-008 | MINOR mandatory | PR body updated to final commit/tree and 73–132 provisional days only **after** corrected commit; AT-026 uses predecessor/current observation UUIDs | D-007/011, RSK-014 | WP-002/005/009 → AT-024/026 |
+
+**Gate:** A reviewer who did not write or control CR-2 must reauthenticate the *new* Git commit/tree, read all affected cross-layer documents and actual diff, verify numerical registers/relative links and challenge every RR2 item. CR-1 cannot be retroactively approved, and this table cannot approve its author. All original physical RF, my-pa database ownership/roles/migration, Open-Meteo licensing, iPhone/private ingress, backup/restore, deployment, merge, destructive and risk gates remain closed.

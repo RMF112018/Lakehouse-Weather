@@ -1,6 +1,6 @@
 # 00 — Executive summary: multi-location Lakehouse Weather
-**Plan ID:** LHW-ML-20261023 | **Version:** 1.0 CORRECTED REVIEW CANDIDATE | **Date:** 2026-10-23
-**Disposition:** CR-1 CORRECTIONS_PROPOSED / FRESH_INDEPENDENT_EXACT_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_AUTHORITY / PRODUCTION_BLOCKED
+**Plan ID:** LHW-ML-20261023 | **Version:** 1.1 CR-2 DOCUMENTARY CORRECTIVE CANDIDATE | **Date:** 2026-10-23
+**Disposition:** CR-2 DOCUMENTARY CORRECTIONS_PROPOSED / FRESH_INDEPENDENT_NEW_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_AUTHORITY / PRODUCTION_BLOCKED
 **Authority:** Planning-only. No weather service, database migration, credential, NAS configuration or production deployment has been changed.
 **Controlling identities:** `RMF112018/Lakehouse-Weather main@aea6bada042b34a8365c9e70e3a6a0f90304f3f0` (tree `a3a375a2235294b886703a9e698675be79e5831f`); `RMF112018/my-pa main@3d1593aa4dc2477395b47c97067338f8c46eff0b` (tree `fa7e416a83d67284b0801e5f59f04189d780bbee`), observed 2026-10-23. Revalidate at implementation gate.
 
@@ -89,3 +89,8 @@ The independent review `LHW-INDEPENDENT-PLAN-REVIEW-20261023-001` concluded `PLA
 - **Refinements:** Open-Meteo Best Match model-run `UNKNOWN` and effective weighted quota, 73–132d provisional effort, static-only offline PWA cache and no false remote wipe guarantee.
 
 Controlling corrective design: [03 transport](03_TARGET_ARCHITECTURE.md), [04 schema §7](04_POSTGRESQL_INTEGRATION.md), [05 domain §11](05_WEATHER_DATA_MODEL.md), [06 provider/RF](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09 acceptance §7](09_VALIDATION_AND_ACCEPTANCE.md), [10 WPs](10_IMPLEMENTATION_WORK_PACKAGES.md) and [11 finding crosswalk](11_RISK_AND_DECISION_REGISTER.md). **A fresh independent reviewer must issue a new `PLAN_APPROVED`, `PLAN_REVISION_REQUIRED` or `PLAN_BLOCKED` against the actual revised HEAD/tree.** All other migration, hardware, credentials, provider, NAS, merge, deployment, production and risk gates remain closed.
+
+
+## 10. CR-2 plan corrections — not independently accepted
+
+A fresh independent rereview `LHW-CR1-INDEPENDENT-REREVIEW-20261023-001` concluded `PLAN_REVISION_REQUIRED` at **the preceding** CR-1 HEAD `e048d5de85afc8d275ea258a3db8aeb45b67f360` / tree `76b7ca604ab1f3e325b7853f4be14c2fb97b533f`. This operator-authorized **documentation-only CR-2** proposes corrections for four residual MAJOR contracts (batch HTTP member status, same-event physical device FK, mandatory model-to-raw-event provenance, stable provider-stream/semantic snapshot equality) and four mandatory MINOR refinements (nonce lifecycle, payload-retention wording, offline/SC-05 consistency, PR identity/API acceptance text). See [11 §CR-2](11_RISK_AND_DECISION_REGISTER.md), [03](03_TARGET_ARCHITECTURE.md), [04](04_POSTGRESQL_INTEGRATION.md), [05](05_WEATHER_DATA_MODEL.md), [06](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09](09_VALIDATION_AND_ACCEPTANCE.md). **No reviewer has yet approved this new corrective HEAD/tree.** Option C remains a proposal; historical accepted ADR-0001 and all my-pa/operator physical/runtime no-go gates remain unchanged.

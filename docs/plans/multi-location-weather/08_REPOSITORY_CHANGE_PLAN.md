@@ -194,3 +194,15 @@ No public secrets or household geolocation, no my-pa refactor, no other provider
 | RV-008/009/010 | provider quotas, WP effort, private frontend cache policy | AT-013/016/020/023 |
 
 Refined contracts: [03](03_TARGET_ARCHITECTURE.md), [04](04_POSTGRESQL_INTEGRATION.md), [05](05_WEATHER_DATA_MODEL.md), [06](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09](09_VALIDATION_AND_ACCEPTANCE.md). All my-pa code, scratch DB actions and production changes require separate explicit operator authorization.
+
+
+## 8. CR-2 — Detailed future file ownership, documentary only
+
+This plan revision adds **no** application/role/DDL/config changes. It refines the separately gated future file responsibilities already described in §1–§7:
+
+- `src/lakehouse_weather/ingestion/receiver.py`, `infrastructure/spool.py`, `api/internal_ingest_routes.py` (WP-005/006/010) implement **one** all-member 200 / any-non-success 207 contract, whole-batch errors only before member processing, fresh signed nonce on retry, durable exact terminal receipt, and nonce-ledger admission only through weather-app's scoped DB role (RR2-001/005).
+- my-pa-owned `migrations/versions/<new_rev>_weather_schema.py` and operator-scoped role provisioning (WP-004) must bind local physical observation to the **same device on its raw event**; remote null-device cases require DB-owned source-kind guard; model runs require matching `(event_id,source_id,stream_id)` FK to immutable raw event metadata with ON DELETE RESTRICT; nonce expiry authority is operator-only (RR2-002/003/005).
+- `src/lakehouse_weather/ingestion/providers/{nws.py,open_meteo.py}`, `application/provider_poll_loop.py` and persistence/domain code (WP-005/007) freeze stream identity across absolute rolling windows, distinct raw/semantic hashes, nullable true model issuance, model source/stream FKs, and quota accounting (RR2-003/004).
+- `web/` / `application/summarize.py` (WP-008/009) show no durable offline weather API cache, label on-read rainfall with **two measured observation UUIDs**, and show null true run issue time where unavailable (RR2-007/008).
+
+All test additions to `tests/` are future WP outputs listed in [09](09_VALIDATION_AND_ACCEPTANCE.md); no fixture has been created by CR-2. Original source files remain untouched pending explicit implementation authorization. A separate independent reviewer must inspect any resulting exact new HEAD before an ADR or implementation decision.
