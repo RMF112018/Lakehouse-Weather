@@ -24,7 +24,7 @@ MVP closed registry (expand only under reviewed versioned mapping):
 | `wind_direction` | `degree` | WH65B or provider | normalize [0,360), circular aggregation; calm => null if direction undefined |
 | `rain_counter` | `mm` | WH65B cumulative counter | never display as rain rate or local-day rainfall total |
 | `rain_increment` / `rain_rate` | `mm` / `mm/h` | **derived** from counter | reset/rollover/gaps invalidate deltas |
-| `barometric_pressure` | `hPa` | independently decoded WH32B/qualified provider | **not inferred from WH65B** |
+| `barometric_pressure` | `hPa` | independently decoded WH32B; **conditional** verified WH65-family compatible pressure-module field; or qualified remote observation | never assume this local WH65B installation contains a working pressure module; distinguish actual pressure type/site |
 | `uv_index` | `index` | WH65B when emitted | not zero when unsupported |
 | `illuminance` / `solar_irradiance` | `lux` / `W/m2` | WH65B when emitted | cannot arbitrarily convert lux to W/m² |
 Additional models (dew point, feels-like, pressure trend, daily rain, highs/lows, sunrise) are derived views with recorded algorithm/version; do not claim independently sensed. Unit conversion occurs once on ingest with versioned rule. Storage numeric precision: preserve decoder supplied significant digits; no fabricated significant figures.
