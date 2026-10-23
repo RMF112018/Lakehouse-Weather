@@ -19,7 +19,7 @@ Lakehouse-Weather/
     types.py                            # source classes / typed names
     application/
       weather_service.py                # bounded use cases for writes/reads
-      provider_poll_loop.py             # one process owner, per-source backoff
+      provider_poll_loop.py             # one process owner, per-stream backoff/weighted quota
       freshness.py
       summarize.py
     domain/
@@ -36,7 +36,7 @@ Lakehouse-Weather/
       db.py                             # weather-only least-privilege connection
       repositories.py                   # explicit weather schema, atomic upsert
       clock.py                          # injectable UTC time
-      spool.py                          # bounded receiver replay store
+      spool.py                          # durable file journal: fsync + rename, replay
     ingestion/
       receiver.py                        # line capture, first-seen IDs, backpressure
       decoder_mapping.py
@@ -52,7 +52,7 @@ Lakehouse-Weather/
       schemas_v1.py
       errors.py
     cli/
-      main.py                           # operator-side location/source registration
+      main.py                           # weather_admin_cli/SET ROLE audited registration
   web/
     src/
       api/typedClient.ts
@@ -159,8 +159,8 @@ File paths and dependency choices are target design, not an instruction to gener
 
 ## 3. my-pa repository ownership (separate work product, not part of this planning PR)
 **No my-pa source modification is authorized by Lakehouse PR.** After operator approves the DB interface, separately scope `RMF112018/my-pa` branch and PR:
-- `migrations/versions/<new_rev>_weather_schema.py`: one additive revision on **then current** Alembic head; full `weather` schema, FKs, constraints, rights/triggers and indexes; **do not hand-edit generated legacy target SQL**.
-- `ops/postgres/provision_weather_roles.py` (or approved existing role provisioning mechanism): explicit owner/migrator/runtime weather-only scope, operator-gated apply and permission readback.
+- `migrations/versions/<new_rev>_weather_schema.py`: a separately authorized additive revision on **then current** Alembic head using [04 §7](04_POSTGRESQL_INTEGRATION.md): event metadata+separate raw payload, provider streams, per-stream state, quota/nonce/metadata-audit tables, composite source/assignment/device/forecast integrity, retirement guards and indexes; never hand-edit legacy target SQL.
+- `ops/postgres/provision_weather_roles.py` (or approved role provisioning mechanism): owner/migrator/app scope, distinct authenticated `weather_admin_cli` NOINHERIT LOGIN and `weather_admin` NOLOGIN with audited metadata-only DML, future **uncommissioned** retention role; operator-gated apply/readback.
 - `tests/schema/test_weather_schema_migration.py`, `tests/database/test_weather_permissions.py`, `tests/database/test_weather_isolation.py`: isolated database, zero unintended schema changes; migration from preceding head, negative grants and backup/restore.
 - `docs/decisions/ADR-016-or-next-weather-schema.md` **only if** my-pa owning ADR index demands it; no invented next ADR number.
 - `docs/00_REPOSITORY_SOURCE_INDEX.md`, nearest DB/migration owning index and runbooks updated under my-pa governance.
@@ -177,3 +177,20 @@ WP-002 ADR/README/roadmap only after plan review; WP-003 independent RF test fir
 
 ## 6. Explicit exclusions
 No public secrets or household geolocation, no my-pa refactor, no other provider RF reception, no new PostgreSQL instance, no cross-DB migration, no change to live roles, no WAN exposure, no destructive legacy cleanup until separately approved. Create/revise only planning documents in this PR. Proposed future deletion of legacy WeeWX files is intentionally blocked by a separate cleanup authorization.
+
+## 7. CR-1 correction ownership and test mapping
+
+**Present authorization covers only corrected Markdown in this existing planning directory.** Future file ownership below is an implementation proposal, not permission to create code, migrations or credentials.
+
+| Finding | Future owning implementation paths | Test criterion |
+|---|---|---|
+| RV-001 | `ingestion/decoder_mapping.py`; RF fixtures | Actual WH65B vs WS69/WH32B decoder AT-004/006 |
+| RV-002 | `infrastructure/repositories.py`; my-pa Alembic `raw_events` metadata/`raw_event_payloads` | FK RESTRICT, 90d/24mo example scratch restore AT-019/023 |
+| RV-003 | `provider_poll_loop.py`, NWS/Open-Meteo adapters; my-pa `provider_streams`, `poll_state(stream_id)` | independently succeeding/failing destination streams AT-016/018 |
+| RV-004 | `cli/main.py`; my-pa admin role provisioner and metadata audit | operator allowed / normal application denied AT-012/021 |
+| RV-005 | weather domain tests; my-pa composite FK/epoch/range/chain triggers | isolated cross-source/time/epoch negatives AT-007/011/013 |
+| RV-006 | `receiver.py`, `spool.py`, `internal_ingest_routes.py`; nonce register | mixed 207, HMAC re-sign, durable journal/crash AT-009/010/025 |
+| RV-007 | `domain/rain.py`, `application/summarize.py`, `/derived` read API | on-read computed rain with paired IDs/cutoff AT-008/014/017 |
+| RV-008/009/010 | provider quotas, WP effort, private frontend cache policy | AT-013/016/020/023 |
+
+Refined contracts: [03](03_TARGET_ARCHITECTURE.md), [04](04_POSTGRESQL_INTEGRATION.md), [05](05_WEATHER_DATA_MODEL.md), [06](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09](09_VALIDATION_AND_ACCEPTANCE.md). All my-pa code, scratch DB actions and production changes require separate explicit operator authorization.

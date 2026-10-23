@@ -24,9 +24,9 @@ Neither publication, commit, PR, merge, CI success, nor existence of a planning 
 7. Preflight scripts are **dry-run by default** and cannot execute Docker start/stop, role provisioning, migrations, backup deletion, or secret mutation. Produce redacted refusal reasons, not secret-bearing Compose output.
 
 ## 3. Container responsibilities and hardening
-**Receiver:** exactly one image with pinned `rtl_433` version, specific approved USB device mapping, read-only config, bounded encrypted/protected local replay spool and rotating logs. Nonroot where USB permission allows; never fall back to `--privileged` without separate security review. Only outbound private authenticated RF-event requests to weather-app, no direct Postgres access. Monitor process, USB disconnect and restart attempts with backoff.
+**Receiver:** exactly one image with pinned `rtl_433`, specific approved USB mapping, read-only config and protected durable filesystem journal with file+directory fsync, atomic rename, per-event ACK and alert on full/corrupt spool; no SQL credential, rotating logs. Sender re-signs each legitimate same-ID retry with fresh HMAC timestamp and nonce. Nonroot where USB permission allows; never fall back to `--privileged` without separate security review. Only outbound private authenticated RF-event requests to weather-app, no direct Postgres access. Monitor process, USB disconnect and restart attempts with backoff.
 
-**Weather-app:** exactly one service/ASGI worker and one provider polling owner; Python REST API + static built PWA, limited egress to NWS/Open-Meteo HTTPS, weather-only SQL role, tiny pool (initial proposed <=2, max_overflow=0), bounded batches and timeouts. Enforce no automatic schema creation or migration on startup. Credential references resolved from owner-only mounts or approved secrets manager. No direct WAN port publishing.
+**Weather-app:** exactly one service/ASGI worker and one provider polling owner with **per-`stream_id`** watermarks/weighted quota admission; Python REST API + static built PWA, limited egress to NWS/Open-Meteo HTTPS, weather-only SQL role, tiny pool (initial proposed <=2, max_overflow=0), bounded batches and timeouts. Enforce no automatic schema creation or migration on startup. Credential references resolved from owner-only mounts or approved secrets manager. No direct WAN port publishing.
 
 **my-pa PostgreSQL:** the physically existing operator-verified instance is *the* canonical DB, including weather data in the proposed isolated schema. DB owner executes any accepted migration/role work. Lakehouse Compose must not launch another Postgres. Protect private application schemas and preserve my-pa's backup/restore contract.
 
@@ -60,7 +60,7 @@ Log opaque source IDs, statuses, event digests and timing; **never log** househo
 
 **Incident matrix:**
 - No packets: inspect hardware/USB/decoder/known ID/spool in order; don't infer new sensor identity.
-- Missing pressure: label unavailable; WH32B/conditional WH65 pressure requires capture provenance.
+- Missing pressure: label unavailable; WH32B or independently classified WS69 pressure requires real capture; the inspected WH65B branch never emits pressure.
 - Negative rain jump: mark unknown reset/rollover, do not insert fabricated rainfall.
 - Provider outage: respect Retry-After, stop advancing cursor, show stale and resume idempotently.
 - DB overload: throttle weather workload before compromising my-pa; DB operator authorizes tuning.
@@ -68,9 +68,17 @@ Log opaque source IDs, statuses, event digests and timing; **never log** househo
 - Restore failure: fail readiness and withhold commissioning, don't mark recovered.
 
 ## 7. Retention, operations calendar and handover
-**Proposed, not authorized for deletion:** raw input 30–90 days, high-resolution observations 12–24 months, longer daily summaries; implement no purge until operator approves measured disk/WAL budget, provider retention restrictions and weather-only recovery test. Daily freshness/backup/quota/spool review, weekly dependency/unknown RF trends, monthly scratch restore or approved frequency, quarterly risk/retention and access review.
+**Proposed, no deletion authority:** immutable event metadata/digests retained as long as referenced measurements (example >=24 months), optional raw JSONB payload separately stored and potentially expired after 90 days only under future authorized policy; observations 12–24 months and derived summary cache longer only if approved; implement no purge until operator approves measured disk/WAL budget, provider retention restrictions and weather-only recovery test. Daily freshness/backup/quota/spool review, weekly dependency/unknown RF trends, monthly scratch restore or approved frequency, quarterly risk/retention and access review.
 
 Handover records actual host/DB identities, current images and source commits, provider/site registrations stored privately, schema/role grants, backup retention+restore, RPO/RTO, license/attribution, sensor replacement steps, confirmed iPhone access, alert recipients, blocked risks and exact operator-only next action. All live evidence remains NOT_VERIFIED until direct runtime tests are performed. For full acceptance identifiers see [09](09_VALIDATION_AND_ACCEPTANCE.md); risk owners [11](11_RISK_AND_DECISION_REGISTER.md).
 
 ## 8. Exact traceability
 D-006/D-008/D-009/D-012; WP-004/WP-010/WP-011/WP-012; AT-011/AT-012/AT-019/AT-022/AT-023/AT-024/AT-027. All thresholds and backup effects remain PROPOSED until exact-environment evidence and operator approval.
+
+## CR-1 — Corrected recovery, provenance, private cache and operating bounds
+
+The canonical weather record has immutable `raw_events` metadata/digests, with optional JSONB bytes only in `raw_event_payloads`. A proposed 90-day payload horizon and 24-month measured-observation horizon can coexist because observation and model lineage FKs refer to immutable event metadata with `ON DELETE RESTRICT`, not expiring JSONB; no payload expiry is approved by this plan. Backup/restore AT-019 must use a fresh disposable full my-pa snapshot after a **synthetic operator-authorized scratch-only** payload-expiry example and prove old records, event SHA, source/device/assignment links, role metadata and missing expired bytes; backup may not recreate external secret/credential state without separate owner evidence.
+
+Receiver journal acceptance requires fsynced staging before send, exact per-item committed ACK, mixed batch 207 processing and new nonce/HMAC per attempt without changing first-seen event ID. Process crash, DB outage, spool full, torn file and auth refusal each have separate health and gap evidence. Stream-specific provider cursor failures never change a different site's watermark. Operator-only metadata registration uses approved `weather_admin_cli` and auditable `SET ROLE weather_admin` under my-pa DB gate, **not** normal app permissions.
+
+Private PWA/API defaults: `Cache-Control: no-store` for location/history/weather data and static-only service-worker precache; tailnet/ACL revocation blocks future network access but is not remote device data erasure. Any future offline weather cache requires separate operator privacy approval. Real NAS/USB, backup, DB head, performance, cloud network and iPhone remain unverified. This resolves planning contracts `LHW-RV-002/003/004/006/010` for fresh independent review only, with tests in [09](09_VALIDATION_AND_ACCEPTANCE.md).

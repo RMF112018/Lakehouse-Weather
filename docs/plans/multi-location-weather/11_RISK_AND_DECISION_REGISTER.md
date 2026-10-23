@@ -1,5 +1,5 @@
 # 11 — Risks, decisions, findings, open dependencies
-**Package:** LHW-ML-20261023 | **Checkpoint CP-2** | **Status:** PROPOSED. This register never substitutes for operator approval, my-pa governance, RF evidence or runtime verification.
+**Package:** LHW-ML-20261023 | **Checkpoint CP-2** | **Status:** CORRECTIVE PLAN CANDIDATE / INDEPENDENT EXACT-HEAD REREVIEW REQUIRED. Previous report: `PLAN_REVISION_REQUIRED` at `78a33161e38dce7adb2476e74488f18ccd6ad01f`. This register never substitutes for operator approval, my-pa governance, RF evidence or runtime verification.
 
 ## Decision register
 | ID | Decision | Rationale/status | Work packages | Acceptance |
@@ -10,9 +10,9 @@
 | D-004 | Separate observation, modeled and forecast semantics | PROPOSED; prevents false source claims | WP-005, WP-007, WP-009 | AT-013, AT-017 |
 | D-005 | NWS + conditional Open-Meteo, no broad provider framework | PROPOSED; smallest coverage set with known published APIs | WP-007 | AT-016, AT-018 |
 | D-006 | Private Tailscale access first, authenticated public optional | PROPOSED; narrow attack surface | WP-010 | AT-020, AT-022 |
-| D-007 | Rainfall algorithm preserves raw counters and incomplete periods | PROPOSED; no invented deltas on reset or gap | WP-005, WP-006, WP-008 | AT-008, AT-014 |
+| D-007 | Physical rain counter plus on-read DERIVED interval/rate with source-pair lineage | PROPOSED; no invented deltas on reset or gap | WP-005, WP-006, WP-008 | AT-008, AT-014 |
 | D-008 | my-pa Alembic-only weather schema DDL; dedicated restricted roles | PROPOSED; migration ownership; no direct app DDL | WP-004 | AT-011, AT-012 |
-| D-009 | Non-destructive retention policy with budget before purge | PROPOSED; may initially accumulate data; deletion operator gated | WP-008, WP-012 | AT-019, AT-023 |
+| D-009 | Long-lived event metadata and separately expiring raw payload with operator-gated retention | PROPOSED; may initially accumulate data; deletion operator gated | WP-008, WP-012 | AT-019, AT-023 |
 | D-010 | Mobile static PWA with single API, not WeeWX skin | PROPOSED; multi-location source-aware UX | WP-009 | AT-017, AT-020 |
 | D-011 | Original ADR-0001 remains historical until approved supersession | PROPOSED; no silent governance rewriting | WP-002 | AT-024 |
 | D-012 | First **implementation** package must be WP-003 RF capability proof if hardware present; otherwise WP-004 disposable DB compatibility contract | PROPOSED conditional sequencing; zero live changes | WP-003, WP-004 | AT-001, AT-011 |
@@ -35,7 +35,7 @@
 | RSK-013 | MEDIUM | High-frequency RF records consume excess shared DB resources; DERIVED | benchmark measured 16s packet workload, storage budgets, partitioning only if justified | DB owner; OPEN |
 | RSK-014 | MEDIUM | Existing ADR-0001 accepted and proposed new design conflicts; VERIFIED | prospective replacement ADR explicit status and approved review, leave original intact | Operator; OPEN |
 | RSK-015 | MEDIUM | Other-location NWS station may be geographically distant; VERIFIED API semantics | separate station point, source-location assignment and distance; no false locality claim | Weather engineer; OPEN |
-| RSK-016 | LOW | A pressure metric is assumed from WH65B without physical evidence; VERIFIED upstream field distinction | null on no sensor; record WH32B as separate device if observed | Local agent; OPEN |
+| RSK-016 | LOW | VERIFIED decoder distinction: `MODEL_WH65` lacks the conditional pressure; `MODEL_WS69` branch differs. Real installed pressure remains unknown | null on no sensor; record WH32B as separate device if observed | Local agent; OPEN |
 
 ## Blocking decisions / unknowns
 | ID | Exact question | Gate |
@@ -75,3 +75,22 @@ Every repository/upstream finding F-001..F-015 originated in [01](01_SOURCE_AND_
 | F-015 | D-006 | WP-010 | AT-022 |
 
 **Traceability audit:** D-001..D-012 have WP and AT targets in the decision table; WP-001..WP-012 have exact prerequisites and acceptance in [10](10_IMPLEMENTATION_WORK_PACKAGES.md); AT-001..AT-027 have methods and pass/fail in [09](09_VALIDATION_AND_ACCEPTANCE.md). Acceptance does not imply an approved authorization or executed test.
+
+## CR-1 — Original independent findings and correction crosswalk
+
+Source report: `LHW-INDEPENDENT-PLAN-REVIEW-20261023-001`, previous HEAD `78a33161e38dce7adb2476e74488f18ccd6ad01f`. Proposed corrections are **not** independently approved; original F/D/RSK/U/WP/AT/SC IDs are preserved.
+
+| Finding | Plan-level correction | WPs | ATs | Current disposition |
+|---|---|---|---|---|
+| LHW-RV-001 MAJOR | Pinned/newer WH65B pressure **absent**, WS69/WH32B distinct | WP-003/006 | AT-004/006/017 | CORRECTED_IN_PLAN; hardware unknown |
+| LHW-RV-002 MAJOR | Immutable event metadata and separate optional payload, FK RESTRICT; 90d payload/24mo measurements feasible only after future retention approval | WP-004/005/012 | AT-007/019/023 | CORRECTED_IN_PLAN; no purge authorized |
+| LHW-RV-003 MAJOR | Per-`stream_id` cursor for each coordinate product; NWS station stream shared only when upstream identical; weighted provider quota | WP-004/005/007 | AT-013/016/018 | CORRECTED_IN_PLAN; provider not active |
+| LHW-RV-004 MAJOR | Operator-only NOINHERIT metadata CLI/role, auditable controlled registration/retirement; app has no metadata admin | WP-004/005 | AT-012/021 | CORRECTED_IN_PLAN; roles not provisioned |
+| LHW-RV-005 MAJOR | Composite source/event/assignment/run FKs, station/range/epoch guards and correction-chain immutability | WP-004/005 | AT-007/011/013 | CORRECTED_IN_PLAN; scratch tests future |
+| LHW-RV-006 MAJOR | `rf-batch.v1` per-item commit/207 outcomes, signed fresh HMAC nonce retry and fsynced journal | WP-005/006/010/011 | AT-009/010/022/025/027 | CORRECTED_IN_PLAN; no receiver implemented |
+| LHW-RV-007 MAJOR | Rain increments/rates/day sums computed on read as DERIVED with paired observation IDs, never MEASURED | WP-005/008/009 | AT-008/014/017/026 | CORRECTED_IN_PLAN; computation untested |
+| LHW-RV-008 MINOR | Best Match snapshot SHA/revision/UNKNOWN run, effective quota units, license gate | WP-007 | AT-013/016/018 | CORRECTED_IN_PLAN; U-006 open |
+| LHW-RV-009 MINOR | Re-estimate **73–132 person-days**, provisional and excludes gate waiting | WP-001..012 | AT-023/024 | CORRECTED_IN_PLAN; estimate unmeasured |
+| LHW-RV-010 MINOR | Static-only PWA cache, API no-store; tailnet revocation cannot erase existing local data | WP-009/010 | AT-017/020/022 | CORRECTED_IN_PLAN; device proof future |
+
+Binding details: [03 transport](03_TARGET_ARCHITECTURE.md), [04 PostgreSQL §7](04_POSTGRESQL_INTEGRATION.md), [05 source/weather model](05_WEATHER_DATA_MODEL.md), [06 RF/providers](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09 acceptance §7](09_VALIDATION_AND_ACCEPTANCE.md), [10 WPs](10_IMPLEMENTATION_WORK_PACKAGES.md). Each correction is a proposed design, **not** implementation evidence. Original risks RSK-001..RSK-016 and unknowns U-001..U-010 remain open to future gates; fresh independent plan review is required at the new HEAD/tree. No application code, database, NAS, credentials, public ingress, merge, deployment, deletion or risk acceptance is authorized.

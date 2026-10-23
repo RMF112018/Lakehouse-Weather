@@ -1,6 +1,6 @@
 # 00 — Executive summary: multi-location Lakehouse Weather
-**Plan ID:** LHW-ML-20261023 | **Version:** 0.9 REVIEW CANDIDATE | **Date:** 2026-10-23
-**Disposition:** IMPLEMENTATION_PLAN_PROPOSED / INDEPENDENT_REVIEW_REQUIRED / PRODUCTION_BLOCKED
+**Plan ID:** LHW-ML-20261023 | **Version:** 1.0 CORRECTED REVIEW CANDIDATE | **Date:** 2026-10-23
+**Disposition:** CR-1 CORRECTIONS_PROPOSED / FRESH_INDEPENDENT_EXACT_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_AUTHORITY / PRODUCTION_BLOCKED
 **Authority:** Planning-only. No weather service, database migration, credential, NAS configuration or production deployment has been changed.
 **Controlling identities:** `RMF112018/Lakehouse-Weather main@aea6bada042b34a8365c9e70e3a6a0f90304f3f0` (tree `a3a375a2235294b886703a9e698675be79e5831f`); `RMF112018/my-pa main@3d1593aa4dc2477395b47c97067338f8c46eff0b` (tree `fa7e416a83d67284b0801e5f59f04189d780bbee`), observed 2026-10-23. Revalidate at implementation gate.
 
@@ -28,7 +28,7 @@ External registered locations -> NWS measured site observations & forecasts
 |---|---|
 | WeeWX + SQLite records, generated New Belchertown skin | dedicated source-aware Python service + my-pa PostgreSQL `weather` tables + versioned React/Vite PWA |
 | A single outdoor station and optional indoor sensor | same local installation plus multiple independently registered remote geographic locations |
-| Single-station data fields and sample WH65B fixture | raw events, logical sources, source-to-location assignments, device identity epochs, typed observations, models/forecasts and quality/revisions |
+| Single-station data fields and sample WH65B fixture | immutable raw event metadata/digests plus separately controlled payload bytes, per-location provider streams/cursors, logical sources and time-valid assignments, device epochs, typed measured vs modeled vs DERIVED records and quality/revisions |
 | Optional anonymous internal Mosquitto and floating diagnostic/base image tags | no broker; digest/SHA-pinned decoder, strict private internal authenticated RF forwarding |
 | Status says RF pending and downstream blocked | same status remains pending until real NAS/USB/receiver tests; no claim of implemented ingestion |
 | Ad hoc archive tar/HTTP liveness only | my-pa-owned consistent PG backup/restore, weather provenance, source freshness, replay/failure telemetry and mobile validation |
@@ -46,7 +46,7 @@ Rainfall derives from verified cumulative counter deltas and flags resets, rollo
 ## 5. Proposed execution sequence and effort
 **WP-001** current source and runtime audit → **WP-002** independent plan/ADR approval → parallel **WP-003** hardware RF proof (if dongle present) and **WP-004** separately approved my-pa disposable DB/schema contract → **WP-005** domain/API/persistence → **WP-006** single local RF ingest and **WP-007** remote provider adapters → **WP-008** source-aware historical calculations → **WP-009** iPhone PWA → **WP-010** tailnet/private ingress → **WP-011** integration/independent exact-head review → **WP-012** backup/restore, runbooks and handover.
 
-Estimated **53–95 experienced engineering person-days** (not schedule or cost commitment), with parallel execution possible after gates. RF soak adds >=24 elapsed hours. Steps independent of hardware include my-pa authorization/documentary schema design, synthetic domain/test fixtures and NWS/Open-Meteo contract tests; none permit claiming live RF success. [10](10_IMPLEMENTATION_WORK_PACKAGES.md) gives per-WP repository, prerequisites, deliverables, risks, exclusions and effort; [09](09_VALIDATION_AND_ACCEPTANCE.md) provides 27 acceptance tests.
+Revised planning sensitivity **73–132 experienced engineering person-days** (original 53–95 was an optimistic but correctly summed estimate) (not schedule or cost commitment), with parallel execution possible after gates. RF soak adds >=24 elapsed hours. Steps independent of hardware include my-pa authorization/documentary schema design, synthetic domain/test fixtures and NWS/Open-Meteo contract tests; none permit claiming live RF success. [10](10_IMPLEMENTATION_WORK_PACKAGES.md) gives per-WP repository, prerequisites, deliverables, risks, exclusions and effort; [09](09_VALIDATION_AND_ACCEPTANCE.md) provides 27 acceptance tests.
 
 ## 6. Material open decisions / no-go gates
 | ID / risk | Open item | Required proof |
@@ -60,7 +60,7 @@ Estimated **53–95 experienced engineering person-days** (not schedule or cost 
 No gate is recorded as passed without actual evidence at the correct identity. No unapproved purchasing based solely on this plan.
 
 ## 7. Recommended next action
-**Immediate:** submit this *planning-only* PR for independent review and obtain an explicit architecture/ADR and my-pa DB ownership decision. **First technical work package after plan approval: WP-003 — local RF/USB acceptance**, provided the selected Nooelec kit is physically available and bounded NAS inspection is authorized. If it is absent, pursue the **documentary/scratch design-only portion of WP-004** in parallel after exact my-pa authorization; never infer RF Gate PASS.
+**Immediate:** submit this *planning-only* PR for independent review and obtain an explicit architecture/ADR and my-pa DB ownership decision. **First technical work package after independently approved corrected plan and exact operator authority: WP-003 — local RF/USB acceptance**, provided the selected Nooelec kit is physically available and bounded NAS inspection is authorized. If it is absent, pursue the **documentary/scratch design-only portion of WP-004** in parallel after exact my-pa authorization; never infer RF Gate PASS.
 
 ## 8. Package status and navigation
 - 01 Source / as-found system audit and 15 finding classifications
@@ -77,3 +77,15 @@ No gate is recorded as passed without actual evidence at the correct identity. N
 - 12 Operations, continuity, recovery and nondelegable production gates
 - 13 Dependencies, licensing, bill of materials, sizing assumptions
 See [README](README.md) for index, checkpoint commits, package coverage and authoritative external links. This is **not independently approved** and does **not** demonstrate physical or production operation.
+
+## 9. Corrective review candidate — CR-1 (not self-approved)
+
+The independent review `LHW-INDEPENDENT-PLAN-REVIEW-20261023-001` concluded `PLAN_REVISION_REQUIRED` against old HEAD `78a33161e38dce7adb2476e74488f18ccd6ad01f` and tree `782327104e71ef144410285eafc534e75c3470b6`. This revision repairs seven MAJOR design contracts and three MINOR refinements **on planning Markdown only**. Exact new corrective HEAD/tree are established by GitHub after commit; the previous review verdict does not automatically apply to the revised HEAD.
+
+- **Decoder:** inspected `Fineoffset-WH65B` cannot report the optional `MODEL_WS69` pressure field; separate actual WH32B/other qualified sensor only.
+- **Provenance:** immutable raw-event metadata/digest outlives referencing measurements, optional raw payloads separate; 90-day payload/24-month observation is a possible future operator-gated policy with no purge now.
+- **Sources/privilege:** independent provider streams/cursors per coordinate, shared measured NWS station where appropriate; restricted app vs separately authorized auditable metadata-admin CLI; SQL composite integrity and half-open station epochs.
+- **Transport/meteorology:** durable fsynced first-seen packet journal, signed fresh-nonce attempts and per-member exact 200/207 ACK; rainfall increments/rates/totals DERIVED on read with two measured input IDs and correction-aware quality.
+- **Refinements:** Open-Meteo Best Match model-run `UNKNOWN` and effective weighted quota, 73–132d provisional effort, static-only offline PWA cache and no false remote wipe guarantee.
+
+Controlling corrective design: [03 transport](03_TARGET_ARCHITECTURE.md), [04 schema §7](04_POSTGRESQL_INTEGRATION.md), [05 domain §11](05_WEATHER_DATA_MODEL.md), [06 provider/RF](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09 acceptance §7](09_VALIDATION_AND_ACCEPTANCE.md), [10 WPs](10_IMPLEMENTATION_WORK_PACKAGES.md) and [11 finding crosswalk](11_RISK_AND_DECISION_REGISTER.md). **A fresh independent reviewer must issue a new `PLAN_APPROVED`, `PLAN_REVISION_REQUIRED` or `PLAN_BLOCKED` against the actual revised HEAD/tree.** All other migration, hardware, credentials, provider, NAS, merge, deployment, production and risk gates remain closed.

@@ -1,6 +1,6 @@
 # Multi-location Lakehouse Weather — Planning Package Index
-**Plan ID:** LHW-ML-20261023 | **Revision:** 0.9 (planning PR candidate) | **Date:** 2026-10-23
-**Disposition:** PROPOSED / INDEPENDENT_PLAN_REVIEW_REQUIRED / NO_IMPLEMENTATION_OR_DEPLOYMENT
+**Plan ID:** LHW-ML-20261023 | **Revision:** 1.0 CR-1 (corrected planning review candidate) | **Date:** 2026-10-23
+**Disposition:** CR-1_CORRECTED_CANDIDATE / FRESH_INDEPENDENT_EXACT_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_OR_DEPLOYMENT
 **Scope:** implementation-ready plan for one NAS RF receiver (local Ambient WH65B + optional WH32B), many distinct API-sourced locations, shared existing my-pa PostgreSQL, source-aware iPhone dashboard. Source files from main remain unchanged.
 
 ## Start here
@@ -47,3 +47,9 @@ These SHAs are **GitHub planning-branch writes with readback for CP-1** and sour
 
 ## No-go and open approval boundary
 This branch is **planning documentation only**. Approval by an independent planning reviewer is outstanding. my-pa migrations/role grants, live production DB, real sensor identifiers/geolocation, external provider secret enrollment, NAS runtime deployment, Cloudflare/Tailscale provisioning, purge/cleanup and merge **are not authorized** by these files. No passed physical RF, backup, production access, CI test or independent implementation review is asserted. Start actual implementation only after the explicit scope/repository/identity/gate decision described in [10](10_IMPLEMENTATION_WORK_PACKAGES.md).
+
+## CR-1 independent review correction lineage
+
+The first independent review `LHW-INDEPENDENT-PLAN-REVIEW-20261023-001` found `PLAN_REVISION_REQUIRED` against prior HEAD `78a33161e38dce7adb2476e74488f18ccd6ad01f`, tree `782327104e71ef144410285eafc534e75c3470b6`. The current candidate documents corrections to `LHW-RV-001..007` (major) and `LHW-RV-008..010` (minor), preserving all F/D/RSK/U/WP/AT/SC identifiers. See [11 corrective findings](11_RISK_AND_DECISION_REGISTER.md), [03 signed RF protocol](03_TARGET_ARCHITECTURE.md), [04 DB key/retention/roles](04_POSTGRESQL_INTEGRATION.md), [05 model/derived semantics](05_WEATHER_DATA_MODEL.md), [09 acceptance](09_VALIDATION_AND_ACCEPTANCE.md) and [10 revised 73–132d provisional effort](10_IMPLEMENTATION_WORK_PACKAGES.md).
+
+**A fresh reviewer independent of the correction author must review the actual new Git HEAD/tree; no model self-approval.** All live gates, my-pa DB ownership, hardware, credentials, provider terms, activation, production and merge remain separately blocked. The unchanged 16-filename package is documentation only, and historical checkpoint commits remain evidence, not current approval.
