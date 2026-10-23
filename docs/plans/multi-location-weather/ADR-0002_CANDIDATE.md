@@ -1,5 +1,5 @@
 # ADR-0002 Candidate — Source-aware multi-location Lakehouse Weather using existing my-pa PostgreSQL
-- **Status:** CR-2_CORRECTED_PROPOSAL_FOR_FRESH_INDEPENDENT_NEW_HEAD_REVIEW — NOT ACCEPTED
+- **Status:** CR-3_NF001_NF002_CORRECTED_PROPOSAL_FOR_FRESH_INDEPENDENT_EXACT_HEAD_REVIEW — NOT ACCEPTED
 - **Proposal ID:** LHW-ML-20261023-D-001
 - **Date:** 2026-10-23
 - **Controlling repository:** RMF112018/Lakehouse-Weather
@@ -44,3 +44,12 @@ The next independent report `LHW-CR1-INDEPENDENT-REREVIEW-20261023-001` found `P
 5. Offline cold-start weather is unavailable under static-only PWA caching; an already-open page can show its in-memory last reading with OFFLINE/as-of stamp. Tests retain two measured observation IDs for derived rain.
 
 These are design contracts for separately authorized future my-pa and Lakehouse implementation, **not** SQL, permission, runtime or production approval. Accepted `docs/adr/0001-use-weewx-ecosystem.md` is untouched until an authorized supersession decision, and this candidate is not self-approved.
+
+## CR-3 — Remaining material geographic and authenticated-ACK contract precision (NOT ACCEPTED)
+
+The independent CR-2 report `LHW-CR2-INDEPENDENT-PLAN-REVIEW-20261023-001` determined **PLAN_REVISION_REQUIRED** at then-HEAD `d0739f9e4ceba5ee45e8ba8ab8891cb68c994e23` / tree `45d2ead414320e275cb97d31f819f7a944f55e47` for two MAJOR new gaps. Option C remains preferred **only as a planning candidate**, with original accepted `docs/adr/0001-use-weewx-ecosystem.md` untouched pending a separate supersession decision.
+
+1. **LHW-CR2-NF-001, my-pa DB owner:** `FORECAST_MODEL` product stream and model run/value each require a matching non-null immutable `stream_id/source_id/assignment_id/stream_class`; qualify by composite FKs to stream and run, not only separate source/assignment FKs. Shared NWS actual measured station uses `MEASURED_STATION` with NULL stream assignment exclusively for typed measured observations. Same-source valid A/B cross-assigned model run/value must fail PostgreSQL FK. See [04 §8](04_POSTGRESQL_INTEGRATION.md) and [05 §12](05_WEATHER_DATA_MODEL.md). No DDL authority follows.
+2. **LHW-CR2-NF-002, Lakehouse receiver/security:** dedicated nonpublic **TLS 1.3 mutual TLS** with dedicated approved internal CA, verified exact weather-ingest server SAN and receiver client cert is required for co-host Docker bridge and contingency remote Linux host. The receiver must also verify distinct per-receiver `rf-ack-mac.v1` server HMAC covering exact current signed request attempt, HTTP status and complete response before retiring the durable packet or recording terminal status. Forged complete 200/207, old replay, bad peer/cert/key/time or downgraded channel keeps the event pending. See [03 §11](03_TARGET_ARCHITECTURE.md), [06 §10](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [12 §9](12_OPERATIONS_AND_LIFECYCLE.md). No real key/cert/network action follows.
+
+The acceptance IDs, owners and negative proofs are preserved and strengthened in [09 §8](09_VALIDATION_AND_ACCEPTANCE.md) and [11 CR-3](11_RISK_AND_DECISION_REGISTER.md); WPs remain 12 at provisional **73–132 active person-days**. Fresh independent exact-head plan rereview is a **hard gate**. Neither a correction author's statements, scaffold CI, this proposed ADR nor repository publication grants implementation, migration, merge, deployment, production activation or risk acceptance.

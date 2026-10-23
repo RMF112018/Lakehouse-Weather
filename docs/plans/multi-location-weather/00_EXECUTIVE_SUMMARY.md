@@ -1,6 +1,6 @@
 # 00 — Executive summary: multi-location Lakehouse Weather
-**Plan ID:** LHW-ML-20261023 | **Version:** 1.1 CR-2 DOCUMENTARY CORRECTIVE CANDIDATE | **Date:** 2026-10-23
-**Disposition:** CR-2 DOCUMENTARY CORRECTIONS_PROPOSED / FRESH_INDEPENDENT_NEW_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_AUTHORITY / PRODUCTION_BLOCKED
+**Plan ID:** LHW-ML-20261023 | **Version:** 1.2 CR-3 NF-001/NF-002 DOCUMENTARY CORRECTIVE CANDIDATE | **Date:** 2026-10-23
+**Disposition:** CR-3_TWO_MATERIAL_DESIGN_CORRECTIONS_PROPOSED / FRESH_INDEPENDENT_EXACT_HEAD_REVIEW_REQUIRED / NO_IMPLEMENTATION_AUTHORITY / PRODUCTION_BLOCKED
 **Authority:** Planning-only. No weather service, database migration, credential, NAS configuration or production deployment has been changed.
 **Controlling identities:** `RMF112018/Lakehouse-Weather main@aea6bada042b34a8365c9e70e3a6a0f90304f3f0` (tree `a3a375a2235294b886703a9e698675be79e5831f`); `RMF112018/my-pa main@3d1593aa4dc2477395b47c97067338f8c46eff0b` (tree `fa7e416a83d67284b0801e5f59f04189d780bbee`), observed 2026-10-23. Revalidate at implementation gate.
 
@@ -10,7 +10,7 @@
 ```text
 Local WS-2000 WH65B (+ optional WH32B) -> 915 MHz -> Nooelec RTL-SDR
   -> pinned rtl_433 in NAS-isolated receiver container
-  -> authenticated, replay-safe private ingest -> weather-app (Python API+poller)
+  -> TLS 1.3 mTLS private RF ingest + independently server-signed ACK -> weather-app (Python API+poller)
 External registered locations -> NWS measured site observations & forecasts
                               -> optional Open-Meteo MODELED data
   -> common source-aware normalization/quality/provenance service
@@ -94,3 +94,12 @@ Controlling corrective design: [03 transport](03_TARGET_ARCHITECTURE.md), [04 sc
 ## 10. CR-2 plan corrections — not independently accepted
 
 A fresh independent rereview `LHW-CR1-INDEPENDENT-REREVIEW-20261023-001` concluded `PLAN_REVISION_REQUIRED` at **the preceding** CR-1 HEAD `e048d5de85afc8d275ea258a3db8aeb45b67f360` / tree `76b7ca604ab1f3e325b7853f4be14c2fb97b533f`. This operator-authorized **documentation-only CR-2** proposes corrections for four residual MAJOR contracts (batch HTTP member status, same-event physical device FK, mandatory model-to-raw-event provenance, stable provider-stream/semantic snapshot equality) and four mandatory MINOR refinements (nonce lifecycle, payload-retention wording, offline/SC-05 consistency, PR identity/API acceptance text). See [11 §CR-2](11_RISK_AND_DECISION_REGISTER.md), [03](03_TARGET_ARCHITECTURE.md), [04](04_POSTGRESQL_INTEGRATION.md), [05](05_WEATHER_DATA_MODEL.md), [06](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [09](09_VALIDATION_AND_ACCEPTANCE.md). **No reviewer has yet approved this new corrective HEAD/tree.** Option C remains a proposal; historical accepted ADR-0001 and all my-pa/operator physical/runtime no-go gates remain unchanged.
+
+## 11. CR-3 bounded response to independent CR-2 review (NOT APPROVED)
+
+Independent `LHW-CR2-INDEPENDENT-PLAN-REVIEW-20261023-001` issued **PLAN_REVISION_REQUIRED** against previous PR #1 HEAD `d0739f9e4ceba5ee45e8ba8ab8891cb68c994e23` / tree `45d2ead414320e275cb97d31f819f7a944f55e47`. The mechanical census had passed, but two NEW MAJOR design defects remained. This operator-authorized **documentation-only CR-3** corrects just those contracts and their acceptance/ownership crosswalk; it does not amend actual PostgreSQL or receiver code.
+
+- **NF-001 PostgreSQL provenance:** every coordinate `FORECAST_MODEL` stream, model run and model value carries a **non-null immutable source/stream/assignment/class** with matching database composite foreign keys. A lawful same-source assignment B cannot receive model values fetched for A. Shared physical `MEASURED_STATION` NWS stream has NULL owner assignment and may only support correctly attributed physical measured observations, not model rows. See [04 §8](04_POSTGRESQL_INTEGRATION.md), [05 §12](05_WEATHER_DATA_MODEL.md) and [09 §8](09_VALIDATION_AND_ACCEPTANCE.md).
+- **NF-002 authenticated RF ACK:** **mandatory mTLS 1.3 even on the Docker bridge** (dedicated validated internal CA/server SAN and registered receiver client identity), and separately keyed HMAC-SHA256 `rf-ack-mac.v1` over **the current signed request attempt, exact status and complete response**. A forged matching 200/207 or replay from an older send must not retire the only staged record; correct terminal receipt is separately fsynced. Remote Linux fallback must meet the same controls. See [03 §11](03_TARGET_ARCHITECTURE.md), [06 §10](06_INGESTION_AND_SOURCE_INTEGRATIONS.md), [12 §9](12_OPERATIONS_AND_LIFECYCLE.md) and [09 §8](09_VALIDATION_AND_ACCEPTANCE.md).
+
+**Remains proposed:** retain Option C, all original F/D/RSK/U/WP/AT/SC/I stable identifiers and preliminary 73–132 engineer-day estimate; no tests run, no independent new-head review concluded, no accepted superseding ADR. Cross-repo my-pa migration authority, RF hardware, credentials, provider permissions, private iPhone, backup/retention, merge and production decisions remain separate operator gates. A new independent reviewer must bind an explicit `PLAN_APPROVED`, `PLAN_REVISION_REQUIRED` or `PLAN_BLOCKED` to the actual Git successor **HEAD/tree**; this correction does not self-approve.
