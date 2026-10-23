@@ -1,53 +1,28 @@
 # Architecture
 
-## Scope
+The 2026-10-23 operator objective admits a multi-location nonproduction application using the existing my-pa PostgreSQL store. [ADR-0002](adr/0002-multi-location-postgresql-dashboard.md) supersedes conflicting SQLite/WeeWX and RF-before-application provisions. Original RF commissioning evidence remains pending.
 
-Lakehouse Weather replaces the failed WS-2000 console as the receiver, archive, and dashboard path while retaining the existing outdoor sensor array.
+```text
+WH65B array -> rtl_433 JSON -> private authenticated ingest
+                                         |
+                                  weather application
+                                   /       |       \
+                       weather-only PG   HTTP UI   Open-Meteo
+                       schema in my_pa    / API    explicit refresh
+                                           |
+                                    mobile / desktop
+```
 
-## Runtime components
+One process serves the static UI and bounded API. No frontend build process, broker, queue, separate archive database or tunnel service is required. Its simple HTTP server is nonproduction; production serving and origin limits require admission.
 
-### 1. RF sensor layer
-- Existing Ambient Weather WS-2000 outdoor array / Fine Offset WH65B family.
-- Optional existing WH32B indoor temperature/humidity/pressure sensor if it is still transmitting.
-- 915 MHz ISM-band transmissions.
+Locations own IANA timezones and forecast coordinates. Stations belong to one location, with stable identifiers independent of receiver identity. Observations use UTC time plus station identity for deduplication. An explicit decoder model/sensor-ID pair maps to exactly one station; adjacent RF sensors are not auto-attached. History/current readings are station-specific, and late arrivals never replace newer conditions. Cumulative rain remains distinct from derived intervals.
 
-### 2. RF receiver
-- RTL-SDR USB dongle and 915 MHz antenna.
-- Attached to the Synology DS923+.
-- `/dev/bus/usb` is passed into the receiver container only after Gate 1 proves DSM/Container Manager access.
+Synthetic mode has an in-memory store, never claims persistence or measured weather, and is never a fallback when PostgreSQL fails. PostgreSQL mode requires explicit nonproduction opt-in and a dedicated role. Configuration and ingest credentials stay server-side. Browser traffic is same-origin; no browser parameter selects forecast hosts or database endpoints.
 
-### 3. Decoder
-- `rtl_433`, pinned to a known commit in `UPSTREAMS.lock`.
-- Produces JSON during Gate 1.
-- In steady state it is launched by `weewx-sdr` in the WeeWX container.
+Database schema/role provisioning, migrations, backup and restore stay owned by my-pa. SQL here is an inert proposal for the owner's canonical Alembic chain. There is no automatic deletion policy.
 
-### 4. Weather engine
-- WeeWX 5 using `weewx-sdr` as the station driver.
-- Default archive is SQLite unless future scale or integrations justify PostgreSQL.
-- WeeWX owns archive intervals, derived observations, summaries, records, reports, and unit conversion.
+Forecasts carry source, retrieval time and availability. Explicit refresh sends registry coordinates to fixed Open-Meteo endpoints, uses bounded requests and preserves old cache on failure. Synthetic forecasts are marked demo. Retention and restart durability require isolated PostgreSQL tests before deployment.
 
-### 5. Presentation
-- New Belchertown WeeWX skin.
-- Static/realtime generated site served by nginx.
-- Mobile-first presentation is expected to work on Safari/iPhone; project-specific styling belongs in `patches/belchertown/` or a dedicated skin fork.
+The operator confirms the failed WS-2000 console. RF reception through an RTL-SDR is the first real station path. Synology USB mapping, actual cadence, sensor identity, clock and calibration remain commissioning gates. Console custom upload is not implemented.
 
-### 6. Remote access
-- Preferred private path: Tailscale.
-- Optional public hostname: Cloudflare Tunnel + Access.
-- No direct WAN exposure of RTL-SDR, WeeWX internals, SQLite, or MQTT.
-
-## Deployment gates
-
-1. **GATE-1-RF** — Synology sees RTL-SDR and `rtl_433` decodes `Fineoffset-WH65B` packets.
-2. **GATE-2-MAP** — WH65B sensor ID and exact field mappings are frozen in WeeWX configuration.
-3. **GATE-3-WEEWX** — WeeWX archives valid observations for at least 24 hours without gaps attributable to the application.
-4. **GATE-4-UI** — New Belchertown renders current/history data correctly on iPhone and desktop.
-5. **GATE-5-REMOTE** — Tailscale and/or Cloudflare Access reaches only the dashboard endpoint.
-6. **GATE-6-OPS** — backup, restore, healthcheck, restart, and sensor-ID-change procedures are tested.
-
-## Non-goals for v1
-
-- Rebuilding a custom FastAPI/React stack.
-- Exposing MQTT to the Internet.
-- Replacing proven WeeWX archive/calculation logic.
-- Automating sensor-ID selection before real RF captures exist.
+The target public path is `https://www.bobby-fetting.me/weather/` through the existing Cloudflare tunnel. Redirect bare `/weather` to `/weather/`, then strip that prefix before forwarding only dashboard routes. Keep machine ingest private. No existing my-pa passkey or Cloudflare Access protection is inherited automatically; choose browser access protection explicitly. No DNS, tunnel, firewall, database or deployment change is performed here.

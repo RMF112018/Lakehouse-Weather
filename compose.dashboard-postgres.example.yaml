@@ -1,0 +1,13 @@
+# INERT nonproduction PostgreSQL overlay. No database service or network admission.
+# Use only against an owner-approved isolated my_pa target and dedicated role.
+# Required environment values are supplied by approved secret/config mechanisms.
+services:
+  dashboard:
+    environment:
+      WEATHER_MODE: postgres
+      WEATHER_ALLOW_DATABASE: nonproduction
+      WEATHER_DATABASE_URL: ${WEATHER_DATABASE_URL:?dedicated isolated weather runtime URL required}
+      WEATHER_INGEST_TOKEN: ${WEATHER_INGEST_TOKEN:?private receiver token required}
+      WEATHER_REGISTRY: /config/stations.json
+    volumes:
+      - ${WEATHER_REGISTRY_FILE:?explicit reviewed registry path required}:/config/stations.json:ro

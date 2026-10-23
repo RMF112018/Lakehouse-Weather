@@ -1,3 +1,9 @@
+# Multi-location implementation status
+
+The synthetic mobile dashboard and PostgreSQL adapter are implemented under ADR-0002. This is a nonproduction implementation; real sensor reception and NAS/database/tunnel activation are unperformed. See the test/review evidence delivered with the implementation for verified results.
+
+# Historical physical commissioning gates
+
 # Implementation status
 
 | Gate | Status | Evidence |

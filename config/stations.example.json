@@ -1,0 +1,20 @@
+{
+  "locations": [
+    {
+      "id": "lakehouse",
+      "name": "Lakehouse \u2014 configure before commissioning",
+      "timezone": "America/New_York",
+      "latitude": 0.0,
+      "longitude": 0.0,
+      "stations": [
+        {
+          "id": "lakehouse-ws2000",
+          "name": "Outdoor array",
+          "model": "Ambient Weather WS-2000",
+          "receiver_model": "Fineoffset-WH65B",
+          "sensor_id": "REPLACE_AFTER_RF_CAPTURE"
+        }
+      ]
+    }
+  ]
+}

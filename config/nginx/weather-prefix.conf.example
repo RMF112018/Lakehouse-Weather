@@ -1,0 +1,24 @@
+# INERT ROUTE PROPOSAL. Merge into the owning www.bobby-fetting.me server only
+# after browser access policy, private origin and existing tunnel review.
+# Assumes an operator-defined upstream named weather_dashboard (no DB access).
+# This does not configure Cloudflare, auth, TLS, firewall or NAS placement.
+location = /weather {
+    return 308 /weather/;
+}
+location = /weather/ {
+    limit_except GET { deny all; }
+    proxy_pass http://weather_dashboard/;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 15s;
+}
+location ~ ^/weather/(index\.html|style\.css|app\.js|icon\.svg|manifest\.webmanifest|api/dashboard|api/history)$ {
+    limit_except GET { deny all; }
+    rewrite ^/weather/(.*)$ /$1 break;
+    proxy_pass http://weather_dashboard;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 15s;
+}
+# Machine ingest and all unlisted paths stay outside the public route.
+location /weather/ {
+    return 404;
+}

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakehouse-weather"
+version = "0.1.0"
+description = "Self-hosted multi-location weather dashboard"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2.10,<3.4"]
+
+[tool.setuptools]
+packages = ["weather"]
