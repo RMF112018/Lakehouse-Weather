@@ -53,3 +53,25 @@
 
 ### Approval boundaries
 This entire register is **design proposal**. User's request authorizes planning files and a review PR only. It does **not** approve migration implementation, DB role provisioning, access to personal coordinates, connection to live my-pa, NAS deployment, credential/tunnel changes, retention purges, or architectural risk acceptance. Any approved corrective changes affecting my-pa must be separately scoped in **that repository** and independently reviewed against exact identity.
+
+## Finding -> decision -> work -> acceptance crosswalk
+Every repository/upstream finding F-001..F-015 originated in [01](01_SOURCE_AND_SYSTEM_AUDIT.md). This provides a stable **PROPOSED mitigation trace**, not independent validation that a fix exists.
+| Finding | Decision/constraint | WP | Test/gate |
+|---|---|---|---|
+| F-001 | D-001, D-002, D-011 | WP-002, WP-004, WP-005 | AT-011, AT-024 |
+| F-002 | D-002, D-011 | WP-002 | AT-024 |
+| F-003 | D-003 | WP-011 | AT-026, AT-027 |
+| F-004 | D-002 | WP-002, WP-003 | AT-001, AT-024 |
+| F-005 | D-002, D-006 | WP-010 | AT-022 |
+| F-006 | D-002, D-012 | WP-003 | AT-001, AT-002, AT-003 |
+| F-007 | D-001, D-008 | WP-004 | AT-011, AT-012 |
+| F-008 | D-008 | WP-001, WP-004 | AT-011, AT-015 |
+| F-009 | D-002, D-007 | WP-003, WP-006 | AT-002, AT-004, AT-006 |
+| F-010 | D-004, D-010 | WP-005, WP-007, WP-009 | AT-013, AT-017 |
+| F-011 | D-009 | WP-004, WP-012 | AT-019 |
+| F-012 | D-006 | WP-003, WP-010 | AT-001, AT-022 |
+| F-013 | D-004 | WP-005, WP-009 | AT-007, AT-021 |
+| F-014 | D-005 | WP-007 | AT-016 |
+| F-015 | D-006 | WP-010 | AT-022 |
+
+**Traceability audit:** D-001..D-012 have WP and AT targets in the decision table; WP-001..WP-012 have exact prerequisites and acceptance in [10](10_IMPLEMENTATION_WORK_PACKAGES.md); AT-001..AT-027 have methods and pass/fail in [09](09_VALIDATION_AND_ACCEPTANCE.md). Acceptance does not imply an approved authorization or executed test.

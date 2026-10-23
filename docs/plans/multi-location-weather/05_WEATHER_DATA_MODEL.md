@@ -85,3 +85,6 @@ I-10: database schema owner and app role have disjoint migration/data privileges
 I-11: model values cannot appear in observation-only API endpoints or measured dashboard components.
 I-12: raw and metric records are non-destructively versioned and the source selection choice is reconstructible.
 Map I-01..I-12 to AT-007..AT-019, AT-023 in [09 acceptance](09_VALIDATION_AND_ACCEPTANCE.md).
+
+## 10. Fixture aliases and time-bound forecast assignments
+SC-01..SC-05 use mnemonic synthetic **fixture aliases** such as `loc_lake_test` for readability; executable SQL/API tests MUST map each alias to a valid synthetic UUID-form `location_id`, `source_id`, `device_id` and `assignment_id` consistent with the schema contract in [04](04_POSTGRESQL_INTEGRATION.md). No fixture alias is an authorized production database primary key or actual personal location. For model forecasts, an existing source-location assignment is resolved at the *provider product issue/retrieval time* (record actual basis); a forecast's future `valid_from` can extend beyond assignment retirement but must remain linked to the original qualified assignment, not silently rebound to a new site. Preserve that historical binding and show effective product source/issue time.

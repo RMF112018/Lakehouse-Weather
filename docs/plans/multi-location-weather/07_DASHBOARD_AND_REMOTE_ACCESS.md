@@ -70,3 +70,6 @@ Example component boundaries in proposed repo: `LocationSelect`, `CurrentConditi
 
 ## 7. Future features and authorization
 Radar imagery (NWS API status endpoints **do not** supply actual radar tiles), warnings, sunrise/sunset, low-battery notifications, individual thresholds, Web Push and location geofencing require independent data-license/privacy/testing gates. A weather model is not a station; the UI contract must remain clear after enhancements. Work and acceptance mapping [09](09_VALIDATION_AND_ACCEPTANCE.md), [10](10_IMPLEMENTATION_WORK_PACKAGES.md).
+
+## 8. Traceability and source-of-truth check
+Proposed design: D-004 (measured vs forecast), D-006 (private ingress), D-010 (mobile PWA); implementation WP-005/WP-008/WP-009/WP-010; acceptance AT-014/AT-017/AT-018/AT-020/AT-021/AT-022/AT-026. All displayed timestamps and source types originate in API records; no frontend synthesis of unavailable measured data. Home Screen push remains deferred.

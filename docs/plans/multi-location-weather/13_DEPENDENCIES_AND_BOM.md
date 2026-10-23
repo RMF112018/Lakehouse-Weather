@@ -56,3 +56,6 @@ Additional recurring expense for baseline is unknown. Existing devices are user-
 - U-007: verified private HTTPS/Tailscale/ACL path; no assumed hostname.
 - U-008..U-009: approved retention/RPO/RTO and freshness/performance thresholds.
 - WP-002: exact package versions, OCI digest pins, ABI/architecture compatibility and SBOM/license review prior to any deployment build.
+
+## 6. Traceability
+D-002/D-005/D-009; WP-002/WP-003/WP-004/WP-007/WP-011/WP-012; AT-001/AT-003/AT-015/AT-016/AT-023/AT-024. Costs are external vendor observations, not purchase authorization or completed asset inventory.

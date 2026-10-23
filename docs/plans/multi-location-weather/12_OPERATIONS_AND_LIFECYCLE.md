@@ -71,3 +71,6 @@ Log opaque source IDs, statuses, event digests and timing; **never log** househo
 **Proposed, not authorized for deletion:** raw input 30–90 days, high-resolution observations 12–24 months, longer daily summaries; implement no purge until operator approves measured disk/WAL budget, provider retention restrictions and weather-only recovery test. Daily freshness/backup/quota/spool review, weekly dependency/unknown RF trends, monthly scratch restore or approved frequency, quarterly risk/retention and access review.
 
 Handover records actual host/DB identities, current images and source commits, provider/site registrations stored privately, schema/role grants, backup retention+restore, RPO/RTO, license/attribution, sensor replacement steps, confirmed iPhone access, alert recipients, blocked risks and exact operator-only next action. All live evidence remains NOT_VERIFIED until direct runtime tests are performed. For full acceptance identifiers see [09](09_VALIDATION_AND_ACCEPTANCE.md); risk owners [11](11_RISK_AND_DECISION_REGISTER.md).
+
+## 8. Exact traceability
+D-006/D-008/D-009/D-012; WP-004/WP-010/WP-011/WP-012; AT-011/AT-012/AT-019/AT-022/AT-023/AT-024/AT-027. All thresholds and backup effects remain PROPOSED until exact-environment evidence and operator approval.

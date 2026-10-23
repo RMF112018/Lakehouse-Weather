@@ -77,14 +77,14 @@ All resources require private authorized session/transport and are returned with
 ### Example semantic response (SYNTHETIC ONLY)
 ~~~json
 {
-  "location_id": "loc_test_1",
+  "location_id": "00000000-0000-4000-8000-000000000101",
   "observation_type": "MEASURED",
   "metrics": [{
     "metric": "air_temperature",
     "value": 24.8,
     "unit": "degC",
-    "source_id": "src_test_wh65b",
-    "device_id": "dev_test_epoch1",
+    "source_id": "00000000-0000-4000-8000-000000000201",
+    "device_id": "00000000-0000-4000-8000-000000000301",
     "observed_at": "2026-10-23T12:00:00Z",
     "ingested_at": "2026-10-23T12:00:01Z",
     "quality": "ACCEPTED",
@@ -119,3 +119,8 @@ All resources require private authorized session/transport and are returned with
 
 ## 8. Unapproved future capabilities
 Multi-user geolocation, commercial/public API, paid provider integrations, long-term raw IQ recording, autonomous station selection, new field sensors, MQTT, generalized event queues, second DB, weather alert rules, remote sensor RF reception, public weather profile pages, iOS push and home automation are deferred. See [07 Dashboard](07_DASHBOARD_AND_REMOTE_ACCESS.md) and [12 Operations](12_OPERATIONS_AND_LIFECYCLE.md). Every new process/port, broad external exposure or data retention is a separate architecture/safety review.
+
+## 9. Terminal/permanent rejection handling and traceability clarification
+A permanently invalid envelope (bad schema, unregistered sensor, impossible metric) must return an event-specific `REJECTED_TERMINAL` result with a stable reason/ref and safe audit count; the receiver removes that event from retry circulation and retains only policy-allowed redacted diagnostic, **not** a perpetual retry. A conflicting reused `event_id`/digest returns 409 and is isolated for operator review; no silent overwrite. Auth failures halt the transport until credentials/policy are corrected. Only 429, 503, timeouts and explicitly retryable errors retain pending event/spool data for exponential retry. A server-acknowledged accepted event means raw+observation transaction committed; terminal rejection is **not** reported as a successful weather observation.
+
+Traceability: D-001/D-002/D-003/D-004/D-006/D-008/D-010; WP-004/WP-005/WP-006/WP-007/WP-009/WP-010; AT-006/AT-009/AT-012/AT-013/AT-017/AT-022/AT-025/AT-026/AT-027. The API example above uses reserved **synthetic UUID-form** identifiers satisfying the proposed schema shape; no actual site or device identity is included.
