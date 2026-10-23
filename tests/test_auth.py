@@ -29,6 +29,24 @@ class PasswordTests(unittest.TestCase):
         self.assertEqual(p.returncode,1)
         self.assertNotIn('password-',p.stdout+p.stderr)
 
+    def test_setup_redacts_driver_constructor_and_write_failures(self):
+        from unittest.mock import patch
+        from weather.__main__ import main
+        class DriverFailure(Exception):
+            pass
+        sentinel='synthetic-secret%ZZ-never-display'
+        for phase in ('constructor','write'):
+            stderr=io.StringIO()
+            with patch.dict(os.environ,{'WEATHER_MODE':'postgres','WEATHER_AUTH_ORIGIN':ORIGIN}), patch.object(sys,'argv',['weather','setup-password','--email','synthetic@example.invalid']), patch('sys.stdin.isatty',return_value=True), patch('sys.stderr',stderr), patch('sys.stderr.isatty',return_value=True), patch('weather.__main__.PostgresStore') as store, patch('weather.__main__.Auth') as auth, patch('getpass.getpass',side_effect=['synthetic-password-123','synthetic-password-123']) as prompt:
+                if phase=='constructor':store.side_effect=DriverFailure(sentinel)
+                else:auth.return_value.setup.side_effect=DriverFailure(sentinel)
+                self.assertEqual(main(),1)
+                if phase=='constructor':prompt.assert_not_called()
+                else:auth.return_value.setup.assert_called_once()
+            self.assertNotIn(sentinel,stderr.getvalue())
+            self.assertNotIn('Traceback',stderr.getvalue())
+            self.assertIn('Weather startup/request failed',stderr.getvalue())
+
     def test_setup_refuses_getpass_fallback_warning_without_plaintext_read(self):
         import getpass
         import warnings

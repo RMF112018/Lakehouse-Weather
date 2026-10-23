@@ -140,7 +140,9 @@ def main():
         with Server((args.host, args.port), handler(app, web_root)) as server:
             print(f'Weather dashboard mode={app.mode} listening at {args.host}:{args.port}', flush=True)
             server.serve_forever()
-    except (ValueError, KeyError, ImportError, OSError):
+    except Exception:
+        # Driver failures are not necessarily ValueError/OSError subclasses.
+        # Redact the entire command lifecycle, including setup credential writes.
         # Never print driver exceptions: they may contain connection credentials.
         print('Weather startup/request failed; check non-secret configuration and database readiness', file=sys.stderr)
         return 1
