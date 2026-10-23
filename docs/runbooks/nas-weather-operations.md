@@ -23,8 +23,22 @@ build attestation. Never invent the reviewed head/tree or substitute a mutable t
 The two pre-existing internal networks and PostgreSQL container are pinned in
 `ops/nas/runtime.py`; any drift requires renewed owner review. There is no Docker
 socket mount, published port or additional database service. The application joins
-existing data-plane and browser-origin networks. Limits are one CPU, 256 MiB and
-64 PIDs; reassess using metadata if startup is memory constrained.
+existing data-plane and browser-origin networks. Dashboard memory is limited to
+256 MiB and forecast memory to 128 MiB. Both services set soft and hard `nproc` and
+`nofile` limits to 256. Linux `RLIMIT_NPROC` counts processes/threads across the real
+UID; UID 10001 can be shared with other containers. This is a UID-wide ceiling,
+not a per-container PID cap. `RLIMIT_NOFILE` bounds each process's open descriptors.
+Record existing UID-10001 task counts before admission and investigate headroom if
+startup or worker creation fails; do not silently raise limits or switch to root.
+
+The verified NAS Docker 24/kernel 4.4 cgroup-v1 runtime cannot apply CPU CFS quotas
+and discards PIDs-controller limits. Accordingly this package sets no `cpus`, CPU
+shares or `pids_limit`; CPU has no hard quota. Two Gunicorn workers, two shared KDF
+slots, authentication rate limits, request/subprocess timeouts, supported memory
+limits and the UID-wide process ceiling bound application work. These controls do
+not provide CPU scheduling isolation. Reassess memory and resource headroom using
+metadata, and verify the configured memory/rlimits inside the actual NAS image
+before admitting the dashboard. Local contract tests do not prove kernel enforcement.
 
 Prepare `/volume1/weather-dashboard/<reviewed-head>/` containing this exact reviewed
 source/package. Prepare four explicit read-only files: approved station registry,

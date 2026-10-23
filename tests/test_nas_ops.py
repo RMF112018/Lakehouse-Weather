@@ -31,7 +31,7 @@ prepare = load('prepare_runtime')
 class NASContracts(unittest.TestCase):
     def test_compose_additive_hardened(self):
         text = (ROOT / 'compose.dashboard.production.yaml').read_text()
-        for required in ['platform: linux/amd64', 'pull_policy: never', 'user: "10001:10001"', 'read_only: true', 'cap_drop: [ALL]', 'no-new-privileges:true', 'restart: unless-stopped', 'mem_limit: 256m', 'pids_limit: 64', 'WEATHER_ALLOW_DATABASE: production', 'WEATHER_DATABASE_URL_FILE:', 'WEATHER_INGEST_TOKEN_FILE:', 'PostgresStore', 'check_ready()']:
+        for required in ['platform: linux/amd64', 'pull_policy: never', 'user: "10001:10001"', 'read_only: true', 'cap_drop: [ALL]', 'no-new-privileges:true', 'restart: unless-stopped', 'mem_limit: 256m', 'WEATHER_ALLOW_DATABASE: production', 'WEATHER_DATABASE_URL_FILE:', 'WEATHER_INGEST_TOKEN_FILE:', 'PostgresStore', 'check_ready()']:
             self.assertIn(required, text)
         self.assertEqual(text.count('external: true'), 2)
         dashboard, forecast = text.split('  forecast:', 1)
@@ -45,6 +45,21 @@ class NASContracts(unittest.TestCase):
         for forbidden in ['ports:', 'build:', 'docker.sock', 'postgres:']:
             self.assertNotIn(forbidden, text)
 
+
+
+    def test_nas_supported_memory_and_uid_rlimits_without_missing_cgroups(self):
+        text = (ROOT / 'compose.dashboard.production.yaml').read_text()
+        dashboard, forecast = text.split('  forecast:', 1)
+        forecast = forecast.split('\nnetworks:', 1)[0]
+        self.assertIn('mem_limit: 256m', dashboard)
+        self.assertIn('mem_limit: 128m', forecast)
+        for service in (dashboard, forecast):
+            self.assertNotRegex(service, r'(?m)^\s*(cpus|cpu_quota|cpu_period|cpu_shares|pids_limit):')
+            self.assertRegex(service, r'ulimits:\n      nproc:\n        soft: 256\n        hard: 256\n      nofile:\n        soft: 256\n        hard: 256')
+            self.assertIn('user: "10001:10001"', service)
+            self.assertIn('read_only: true', service)
+            self.assertIn('cap_drop: [ALL]', service)
+            self.assertIn('no-new-privileges:true', service)
 
     def test_private_health_probe_without_password_or_http_and_redacted_failure(self):
         from weather import __main__ as cli

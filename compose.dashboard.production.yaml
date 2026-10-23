@@ -34,9 +34,16 @@ services:
     tmpfs: ["/tmp:size=16m,mode=1777"]
     restart: unless-stopped
     stop_grace_period: 40s
-    cpus: 1.0
     mem_limit: 256m
-    pids_limit: 64
+    # NAS kernel 4.4 has no CPU CFS/PIDs controllers; use supported rlimits.
+    # nproc is a shared-UID ceiling, not a per-container process count.
+    ulimits:
+      nproc:
+        soft: 256
+        hard: 256
+      nofile:
+        soft: 256
+        hard: 256
     logging:
       driver: none
     healthcheck:
@@ -85,9 +92,16 @@ services:
     tmpfs: ["/tmp:size=8m,mode=1777"]
     restart: unless-stopped
     stop_grace_period: 130s
-    cpus: 0.5
     mem_limit: 128m
-    pids_limit: 32
+    # NAS kernel 4.4 has no CPU CFS/PIDs controllers; use supported rlimits.
+    # nproc is a shared-UID ceiling, not a per-container process count.
+    ulimits:
+      nproc:
+        soft: 256
+        hard: 256
+      nofile:
+        soft: 256
+        hard: 256
     logging:
       driver: none
     healthcheck:
