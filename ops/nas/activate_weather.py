@@ -93,14 +93,17 @@ def private_file(path, data, source):
 
 
 def validate():
-    command([DOCKER, 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--mount', 'type=bind,src=' + str(ROOT / 'caddy.candidate') + ',dst=/etc/caddy/Caddyfile,readonly', '--entrypoint', 'caddy', CONTAINERS[PROXY][1], 'validate', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'])
+    command([DOCKER, 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'NET_BIND_SERVICE', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/config', '--tmpfs', '/data', '--mount', 'type=bind,src=' + str(ROOT / 'caddy.candidate') + ',dst=/etc/caddy/Caddyfile,readonly', '--entrypoint', 'caddy', CONTAINERS[PROXY][1], 'validate', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'])
     command([DOCKER, 'run', '--rm', '--network', 'none', '--read-only', '--user', '65532:65532', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--mount', 'type=bind,src=' + str(ROOT / 'tunnel.candidate') + ',dst=/etc/cloudflared/config.yml,readonly', CONTAINERS[CONNECTOR][1], 'tunnel', '--config', '/etc/cloudflared/config.yml', 'ingress', 'validate'])
 
 
-def manifest():
+def manifest(require_validated=True):
     if ROOT.is_symlink() or ROOT.stat().st_uid != 0 or stat.S_IMODE(ROOT.stat().st_mode) != 0o700:
         raise ValueError('Protected ingress directory identity drift')
-    for name in ['manifest.json', 'validated', 'caddy.original', 'caddy.candidate', 'tunnel.original', 'tunnel.candidate']:
+    names = ['manifest.json', 'caddy.original', 'caddy.candidate', 'tunnel.original', 'tunnel.candidate']
+    if require_validated:
+        names.append('validated')
+    for name in names:
         meta = (ROOT / name).lstat()
         if not stat.S_ISREG(meta.st_mode):
             raise ValueError('Protected ingress artifact type drift')
@@ -215,7 +218,17 @@ def main(argv=None):
     identities(require_running=args.action != 'rollback')
     if args.action == 'prepare':
         if ROOT.exists():
-            raise ValueError('Ingress preparation directory already exists')
+            if (ROOT / 'validated').exists():
+                raise ValueError('Ingress candidates already validated')
+            # A failed validator never changes the live files. Resume only the
+            # same protected original/candidate bytes, after all drift checks.
+            record = manifest(require_validated=False)
+            unchanged(record, 'original')
+            validate()
+            unchanged(record, 'original')
+            (ROOT / 'validated').touch(mode=0o600)
+            print('Ingress candidates validated; originals unchanged; activation pending')
+            return 0
         originals = {key: path.read_bytes() for key, (path, _, _, _) in FILES.items()}
         proposed = candidates(originals['caddy'], originals['tunnel'])
         ROOT.mkdir(mode=0o700)

@@ -107,6 +107,27 @@ class IngressTests(unittest.TestCase):
             command.assert_called_once_with([ingress.DOCKER, 'restart', '--time', '30', ingress.CONNECTOR])
             identities.assert_called_once_with(require_running=False)
 
+
+    def test_caddy_validator_matches_existing_binary_capability_contract(self):
+        with patch.object(ingress, 'command', return_value=b'') as command:
+            ingress.validate()
+            caddy, tunnel = [call.args[0] for call in command.call_args_list]
+            self.assertIn('NET_BIND_SERVICE', caddy)
+            self.assertIn('/config', caddy)
+            self.assertIn('/data', caddy)
+            self.assertIn('none', caddy)
+            self.assertNotIn('NET_BIND_SERVICE', tunnel)
+
+    def test_failed_prepare_resumes_only_unchanged_protected_candidates(self):
+        reviewed = ingress.digest(HELPER.read_bytes())
+        record = {'fixture': 'metadata-only'}
+        with tempfile.TemporaryDirectory() as folder, patch.object(ingress, 'ROOT', Path(folder)), patch.object(ingress.os, 'geteuid', return_value=0), patch.object(ingress, 'identities'), patch.object(ingress, 'manifest', return_value=record) as manifest, patch.object(ingress, 'unchanged') as unchanged, patch.object(ingress, 'validate') as validate, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ingress.main(['prepare', '--reviewed-helper-sha', reviewed]), 0)
+            manifest.assert_called_once_with(require_validated=False)
+            self.assertEqual(unchanged.call_count, 2)
+            validate.assert_called_once()
+            self.assertTrue((Path(folder) / 'validated').is_file())
+
     def test_native_python38_compatible(self):
         ast.parse(HELPER.read_text(), feature_version=(3,8))
 
