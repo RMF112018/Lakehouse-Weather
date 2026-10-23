@@ -336,3 +336,70 @@ class RollupOwnerCliTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[1].kwargs['timeout'],30)
         self.assertIn(identity,run.call_args_list[1].args[0])
         self.assertTrue(run.call_args_list[1].kwargs['capture_output'])
+
+@unittest.skipUnless(os.environ.get('WEATHER_HISTORY_PG')=='127.0.0.1:55439','Requires authorized disposable fixture')
+class BoundedRainPredecessorTests(unittest.TestCase):
+    setUp=PostgresHistoryTests.setUp
+
+    def capture(self, operation):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+        statements=[]
+        connect=self.store.connection
+        @contextmanager
+        def traced():
+            with connect() as connection:
+                class Proxy:
+                    def execute(self,sql,params=None):
+                        statements.append((sql,params))
+                        return connection.execute(sql,params)
+                yield Proxy()
+        with patch.object(self.store,'connection',side_effect=traced):result=operation()
+        return result,statements
+
+    def test_lightning_archive_latest_uses_one_indexed_row_without_rain_search(self):
+        import psycopg
+        with psycopg.connect('postgresql://my_pa@127.0.0.1:55439/my_pa') as owner:
+            owner.execute("INSERT INTO weather.observations(station_id,observed_at,measurements) SELECT %s,%s::timestamptz-i*interval '8 hours',jsonb_build_object('observed_at',to_char((%s::timestamptz-i*interval '8 hours') AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'),'lightning_count_raw',i%%256) FROM generate_series(0,9999) i",(self.sid,NOW,NOW))
+            owner.execute('ANALYZE weather.observations')
+        latest,statements=self.capture(lambda:self.store.latest(self.sid))
+        self.assertIsNone(latest['rain_interval_mm'])
+        self.assertEqual(len(statements),1) # No predecessor query at all.
+        with self.store.connection() as connection:
+            plan=connection.execute('EXPLAIN (ANALYZE,FORMAT JSON) '+statements[0][0],statements[0][1]).fetchone()[0][0]['Plan']
+        def nodes(node):
+            yield node
+            for child in node.get('Plans',[]):yield from nodes(child)
+        scans=[node for node in nodes(plan) if node.get('Index Name')=='observations_pkey']
+        self.assertEqual(len(scans),1)
+        self.assertEqual(scans[0]['Actual Rows'],1)
+        self.assertEqual(scans[0].get('Rows Removed by Filter',0),0)
+        self.assertIn('station_id',scans[0]['Index Cond'])
+        rows,history_statements=self.capture(lambda:self.store.history(self.sid,NOW-timedelta(hours=1)))
+        self.assertEqual(len(rows),1)
+        self.assertEqual(len(history_statements),1)
+
+    def test_rain_predecessor_is_index_bounded_and_preserves_gap_and_late_delta(self):
+        self.store.insert(self.sid,reading(NOW-timedelta(days=1),rain_mm=5))
+        self.store.insert(self.sid,reading(NOW-timedelta(minutes=20),rain_mm=10))
+        self.store.insert(self.sid,reading(NOW,rain_mm=12))
+        latest,statements=self.capture(lambda:self.store.latest(self.sid))
+        self.assertIsNone(latest['rain_interval_mm'])
+        sql,params=statements[-1]
+        self.assertIn('observed_at>=%s',sql)
+        self.assertEqual(params[-1],NOW-timedelta(seconds=900))
+        with self.store.connection() as connection:
+            plan=connection.execute('EXPLAIN (ANALYZE,FORMAT JSON) '+sql,params).fetchone()[0][0]['Plan']
+        def nodes(node):
+            yield node
+            for child in node.get('Plans',[]):yield from nodes(child)
+        scan=next(node for node in nodes(plan) if node.get('Index Name')=='observations_pkey')
+        self.assertIn('observed_at >=',scan['Index Cond'])
+        self.assertIn('observed_at <',scan['Index Cond'])
+        self.assertEqual(scan.get('Rows Removed by Filter',0),0)
+        self.store.insert(self.sid,reading(NOW-timedelta(minutes=5),rain_mm=11))
+        self.assertEqual(self.store.latest(self.sid)['rain_interval_mm'],1)
+        rows,statements=self.capture(lambda:self.store.history(self.sid,NOW))
+        self.assertEqual(rows[0]['rain_interval_mm'],1)
+        self.assertEqual(statements[-1][1][-1],NOW-timedelta(seconds=900))
+        self.assertIn('observed_at>=%s',statements[-1][0])

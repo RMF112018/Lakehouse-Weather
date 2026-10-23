@@ -13,6 +13,7 @@ runtime = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime)
 FORECAST_ID = '1753bcdc3a2a9a65540dff18be70bbf096748fc41745761a7a6763feca47d3ca'
 FORECAST_IMAGE = 'sha256:c8c8e2234d5d12291040d195521f7b7c6e0aa00cab38bd85d24a9a326969d0a6'
+EGRESS_ID = '452efc8852b18bd8a3bcc73ba784b18a64ad1ae6aeadfd13b6ec8cc58bacd9d3'
 BASE = Path('/volume1/weather-dashboard')
 
 def bounded_docker(*args):
@@ -27,6 +28,18 @@ runtime.docker = bounded_docker
 def forecast_identity():
     if runtime.field('container', 'lakehouse-weather-forecast', '{{.Id}} {{.Image}} {{.State.Status}}') != FORECAST_ID + ' ' + FORECAST_IMAGE + ' running':
         raise ValueError('Forecast identity drift')
+    networks = json.loads(runtime.field('container', FORECAST_ID, '{{json .NetworkSettings.Networks}}'))
+    if set(networks) != {'my-pa-nas-contract_data-plane', 'lakehouse-weather-egress'}:
+        raise ValueError('Forecast network set drift')
+    if networks['my-pa-nas-contract_data-plane'].get('NetworkID') != runtime.NETWORKS['my-pa-nas-contract_data-plane']:
+        raise ValueError('Forecast data-plane identity drift')
+    if networks['lakehouse-weather-egress'].get('NetworkID') != EGRESS_ID or networks['lakehouse-weather-egress'].get('IPAddress') != '172.28.0.2':
+        raise ValueError('Forecast egress binding drift')
+    if runtime.field('network', 'lakehouse-weather-egress', '{{.Id}} {{.Internal}}') != EGRESS_ID + ' false':
+        raise ValueError('Forecast egress network drift')
+    members = json.loads(runtime.field('network', EGRESS_ID, '{{json .Containers}}'))
+    if set(members) != {FORECAST_ID} or members[FORECAST_ID].get('IPv4Address') != '172.28.0.2/16':
+        raise ValueError('Exclusive forecast source binding drift')
 
 
 def compose(image):

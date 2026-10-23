@@ -203,7 +203,9 @@ class PostgresStore:
             rows = conn.execute("SELECT measurements - 'raw_rf' - 'provenance' FROM weather.observations WHERE station_id=%s AND observed_at >= %s ORDER BY observed_at LIMIT 20001", (station_id, since)).fetchall()
             if len(rows)>20000:
                 raise RuntimeError('Raw history capacity exceeded; use summaries')
-            prior = conn.execute("SELECT measurements FROM weather.observations WHERE station_id=%s AND observed_at < %s AND measurements->>'rain_total_mm' IS NOT NULL ORDER BY observed_at DESC LIMIT 1", (station_id, since)).fetchone()
+            prior = None
+            if any(row[0].get('rain_total_mm') is not None for row in rows):
+                prior = conn.execute("SELECT jsonb_build_object('observed_at',measurements->'observed_at','rain_total_mm',measurements->'rain_total_mm') FROM weather.observations WHERE station_id=%s AND observed_at<%s AND observed_at>=%s AND measurements->>'rain_total_mm' IS NOT NULL ORDER BY observed_at DESC LIMIT 1", (station_id,since,since-timedelta(seconds=900))).fetchone()
             derived = rain_intervals(([prior[0]] if prior else []) + [r[0] for r in rows])
             return derived[1:] if prior else derived
 
@@ -212,7 +214,9 @@ class PostgresStore:
             row = conn.execute('SELECT measurements, observed_at FROM weather.observations WHERE station_id=%s ORDER BY observed_at DESC LIMIT 1', (station_id,)).fetchone()
             if not row:
                 return None
-            prior = conn.execute("SELECT jsonb_build_object('observed_at',measurements->'observed_at','rain_total_mm',measurements->'rain_total_mm') FROM weather.observations WHERE station_id=%s AND observed_at<%s AND measurements->>'rain_total_mm' IS NOT NULL ORDER BY observed_at DESC LIMIT 1",(station_id,row[1])).fetchone()
+            if row[0].get('rain_total_mm') is None:
+                return rain_intervals([row[0]])[-1]
+            prior = conn.execute("SELECT jsonb_build_object('observed_at',measurements->'observed_at','rain_total_mm',measurements->'rain_total_mm') FROM weather.observations WHERE station_id=%s AND observed_at<%s AND observed_at>=%s AND measurements->>'rain_total_mm' IS NOT NULL ORDER BY observed_at DESC LIMIT 1",(station_id,row[1],row[1]-timedelta(seconds=900))).fetchone()
             return rain_intervals(([prior[0]] if prior else [])+[row[0]])[-1]
 
     def get_forecast(self, location_id):

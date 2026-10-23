@@ -32,4 +32,22 @@ class UpdateTests(unittest.TestCase):
  def test_docker_guard_bounded(self):
   with patch.object(m.subprocess,'run',return_value=types.SimpleNamespace(returncode=0,stdout='ok')) as run:
    self.assertEqual(m.bounded_docker('version'),'ok');self.assertEqual(run.call_args.kwargs['timeout'],15)
+ def test_bound_forecast_network_identity(self):
+  networks={'my-pa-nas-contract_data-plane':{'NetworkID':m.runtime.NETWORKS['my-pa-nas-contract_data-plane']},'lakehouse-weather-egress':{'NetworkID':m.EGRESS_ID,'IPAddress':'172.28.0.2'}}
+  members={m.FORECAST_ID:{'IPv4Address':'172.28.0.2/16'}}
+  def field(kind,target,template):
+   if 'NetworkSettings' in template:return m.json.dumps(networks)
+   if 'Containers' in template:return m.json.dumps(members)
+   if template=='{{.Id}} {{.Internal}}':return m.EGRESS_ID+' false'
+   return m.FORECAST_ID+' '+m.FORECAST_IMAGE+' running'
+  with patch.object(m.runtime,'field',field):
+   m.forecast_identity()
+   for mutation in ('extra_network','wrong_id','wrong_address','foreign_member'):
+    with self.subTest(mutation=mutation):
+     if mutation=='extra_network':networks['foreign']={}
+     elif mutation=='wrong_id':networks['lakehouse-weather-egress']['NetworkID']='wrong'
+     elif mutation=='wrong_address':networks['lakehouse-weather-egress']['IPAddress']='172.28.0.3'
+     else:members['foreign']={'IPv4Address':'172.28.0.3/16'}
+     with self.assertRaises(ValueError):m.forecast_identity()
+     networks.pop('foreign',None);networks['lakehouse-weather-egress']={'NetworkID':m.EGRESS_ID,'IPAddress':'172.28.0.2'};members.pop('foreign',None)
 if __name__=='__main__':unittest.main()
