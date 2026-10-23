@@ -43,3 +43,24 @@ The forecast child has a 120-second timeout and hourly cadence. Failed refreshes
 preserve cached data and explicit stale/unavailable state; a running process is
 not proof of a successful provider refresh. Private dashboard health checks do
 not expose protected weather data or authentication material.
+
+## Dashboard-only feature updates
+
+`update_dashboard.py` admits a separately reviewed image after an additive,
+owner-reviewed schema update. It authenticates the prior dashboard identity,
+new image revision/tree/entrypoint/platform, canonical networks and PostgreSQL,
+and the unchanged forecast container/image. It uses only `up --no-deps
+--no-build --pull never dashboard`. It never recreates the forecast worker,
+changes its egress identity, resets passwords or reads authentication records.
+Only protected file paths are passed to Compose; secret values never enter its
+arguments or diagnostics. A root-protected receipt records old/new image
+identities. Failed readiness triggers recovery to the prior image and reports
+failure rather than declaring partial success.
+
+The previous image remains usable with the additive rollup table. Keep that
+image and prior source on the NAS. Shared ingress rollback authenticates the
+proxy/connector and exact original/candidate files, but deliberately does not
+require the replaced weather application's identity: routing rollback performs
+no operation on that application. Ingress preparation/activation retains the
+application identity/liveness guard. Do not modify or restart shared routing for
+a dashboard-only feature update.

@@ -88,7 +88,7 @@ class IngressTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(ingress, 'ROOT', Path(folder)), patch.object(ingress.os, 'geteuid', return_value=0), patch.object(ingress, 'identities') as identities, patch.object(ingress, 'manifest', return_value=record), patch.object(ingress, 'unchanged') as unchanged, patch.object(ingress, 'rollback_original') as rollback, contextlib.redirect_stdout(io.StringIO()):
             (Path(folder) / 'validated').touch()
             self.assertEqual(ingress.main(['rollback', '--reviewed-helper-sha', reviewed]), 0)
-            identities.assert_called_once_with(require_running=False)
+            identities.assert_called_once_with(require_running=False, include_app=False)
             unchanged.assert_called_once_with(record, 'either')
             rollback.assert_called_once_with(record)
 
@@ -105,7 +105,7 @@ class IngressTests(unittest.TestCase):
             write.assert_called_once_with(record, 'original')
             self.assertIn('files_restored=true runtime_recovered=false', output.getvalue())
             command.assert_called_once_with([ingress.DOCKER, 'restart', '--time', '30', ingress.CONNECTOR])
-            identities.assert_called_once_with(require_running=False)
+            identities.assert_called_once_with(require_running=False, include_app=False)
 
 
     def test_caddy_validator_matches_existing_binary_capability_contract(self):
@@ -131,5 +131,21 @@ class IngressTests(unittest.TestCase):
     def test_native_python38_compatible(self):
         ast.parse(HELPER.read_text(), feature_version=(3,8))
 
+
+    def test_rollback_ignores_replaced_weather_app_identity(self):
+        # Rollback acts only on shared routing components, never the app.
+        def inspect(name, expression):
+            if name == ingress.APP:
+                raise AssertionError('Replaced dashboard must not block route rollback')
+            if expression == '{{.Id}}': return ingress.CONTAINERS[name][0]
+            if expression == '{{.Image}}': return ingress.CONTAINERS[name][1]
+            if expression == '{{.State.Status}}': return 'running'
+            if expression == '{{json .Mounts}}':
+                key='caddy' if name==ingress.PROXY else 'tunnel'
+                return ingress.json.dumps([{'Destination':'/etc/caddy/Caddyfile' if key=='caddy' else '/etc/cloudflared/config.yml','Source':str(ingress.FILES[key][0]),'RW':False,'Type':'bind'}])
+        with patch.object(ingress,'inspect',inspect),patch.object(ingress.Path,'lstat') as meta:
+            # Immutable proxy/connector/file checks remain independently covered.
+            meta.side_effect=[type('Meta',(),{'st_mode':stat.S_IFREG|mode,'st_ino':inode,'st_uid':uid})() for _,(path,inode,uid,mode) in ingress.FILES.items()]
+            ingress.identities(require_running=False,include_app=False)
 
 if __name__ == '__main__': unittest.main()

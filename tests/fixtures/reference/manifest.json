@@ -1,0 +1,30 @@
+{
+  "research_date": "2026-10-23",
+  "live_user_station_capture": false,
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 4422,
+      "sha256": "1a756877f5b93020503916bd2d9435f17f4be35635a0419b01b136989a0fe517",
+      "hash_scope": "stored_raw_bytes"
+    },
+    {
+      "file": "ambient_official_api_excerpt.json",
+      "bytes": 243,
+      "sha256": "dd1731eddb299d85ae976b123b850e842aa384f628809751cfa35e66aa97b5a3",
+      "hash_scope": "stored_raw_bytes"
+    },
+    {
+      "file": "wh31l_reconstructed_from_upstream_packet.json",
+      "bytes": 168,
+      "sha256": "f692025b389f61dfd92abec40c711bfec747bf68996eb1fcb47eaa361036b335",
+      "hash_scope": "stored_raw_bytes"
+    },
+    {
+      "file": "wh65b_upstream_fixture.json",
+      "bytes": 276,
+      "sha256": "81b5ccde615219075b43589bc52325ebf56adcb16a4231ff18ca2c90b4e9eb18",
+      "hash_scope": "stored_raw_bytes"
+    }
+  ]
+}

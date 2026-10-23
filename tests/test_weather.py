@@ -56,7 +56,7 @@ class DomainTests(unittest.TestCase):
         dashboard = Application(locations, store).dashboard()
         self.assertEqual(dashboard['mode'], 'demo')
         self.assertEqual(len(dashboard['locations']), 3)
-        self.assertEqual(len(dashboard['locations'][0]['stations']), 2)
+        self.assertEqual(len(dashboard['locations'][0]['stations']), 3)
         self.assertEqual(dashboard['locations'][0]['forecast']['status'], 'demo')
         self.assertTrue(dashboard['locations'][2]['stations'][0]['stale'])
         self.assertFalse(dashboard['locations'][0]['stations'][0]['stale'])

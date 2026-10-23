@@ -9,7 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit, unquote
 from . import forecast
-from .domain import normalize, stamp, utc
+from .domain import normalize, stamp, utc, CATALOG
+from .history import request_range, HistoryCapacityError
 from .registry import resolve
 
 
@@ -22,6 +23,7 @@ class Application:
             raise ValueError('Password authentication required')
         self.allow_ingest = allow_ingest
         self.station_ids = {s['id'] for loc in locations for s in loc['stations']}
+        self.station_zones = {s['id']:loc['timezone'] for loc in locations for s in loc['stations']}
 
     def dashboard(self):
         now = datetime.now(timezone.utc)
@@ -31,10 +33,11 @@ class Application:
             stations = []
             for station in location['stations']:
                 latest = self.store.latest(station['id'])
-                stations.append({'id': station['id'], 'name': station['name'], 'model': station['model'], 'last_seen': latest['observed_at'] if latest else None, 'stale': latest is None or now - utc(latest['observed_at']) > timedelta(minutes=20), 'observation': latest, 'history': self.store.history(station['id'], now-timedelta(hours=48))})
+                history = self.store.history_summary(station['id'], now-timedelta(hours=48), now, max_points=200, zone=location['timezone'])
+                stations.append({'id': station['id'], 'name': station['name'], 'model': station['model'], 'last_seen': latest['observed_at'] if latest else None, 'stale': latest is None or now - utc(latest['observed_at']) > timedelta(minutes=20), 'observation': latest, 'history': history['history'], 'history_summary': {key:history[key] for key in ('start','end','bucket_seconds','total_observations','coverage')}, 'available_metrics': [key for key in CATALOG if latest and latest.get(key) is not None]})
             row.update(stations=stations, forecast=forecast.cached(self.store, location['id'], now))
             locations.append(row)
-        return {'mode': self.mode, 'generated_at': stamp(now), 'locations': locations}
+        return {'mode': self.mode, 'generated_at': stamp(now), 'locations': locations, 'sensor_catalog': CATALOG}
 
     def ingest(self, packet):
         station_id = resolve(self.locations, packet)
@@ -79,10 +82,18 @@ def dispatch(app, web_root, method, target, headers, stream):
             if parsed.path == '/api/history':
                 query = parse_qs(parsed.query, strict_parsing=True, max_num_fields=8)
                 station = query.get('station_id', [''])[0]
-                hours = int(query.get('hours', ['48'])[0])
-                if station not in app.station_ids or not 1 <= hours <= 168:
-                    return 400, {'error': 'Known station and hours between 1 and 168 required'}, None
-                return 200, {'station_id': station, 'hours': hours, 'history': app.store.history(station, datetime.now(timezone.utc)-timedelta(hours=hours))}, None
+                if station not in app.station_ids:
+                    return 400, {'error': 'Known station required'}, None
+                try:
+                    start,end,limit,metric,zone = request_range(query, app.station_zones[station], earliest=app.store.earliest(station) if query.get('range') == ['all'] else None)
+                except (ValueError, TypeError) as error:
+                    safe = {'Duplicate history parameter','Timezone must match station location','max_points must be between 2 and 800','Unknown metric','Local wall time must not contain an offset','Local time is ambiguous or nonexistent; specify explicit UTC bounds','Choose range or hours','Choose local or UTC bounds','Legacy hours must be between 1 and 168','Unknown history range','Invalid history bounds','Bounds require custom range','Timestamp must be ISO 8601 with UTC offset','Timestamp must include explicit UTC offset'}
+                    message = str(error) if str(error) in safe else 'Invalid history range or timestamp'
+                    return 400, {'error':message}, None
+                result = app.store.history_summary(station,start,end,limit,metric,zone)
+                if 'hours' in query:
+                    result['hours'] = int(query['hours'][0])
+                return 200, result, None
             if parsed.path.startswith('/api/'):
                 return 404, {'error': 'Not found'}, None
             root = Path(web_root).resolve()
@@ -112,7 +123,9 @@ def dispatch(app, web_root, method, target, headers, stream):
         if not isinstance(packet, dict):
             raise ValueError('Packet object required')
         return 200, app.ingest(packet), None
-    except (ValueError, TypeError, UnicodeError):
+    except HistoryCapacityError as error:
+        return 422, {'error':str(error)}, None
+    except (ValueError, TypeError, UnicodeError, RecursionError):
         return 400, {'error': 'Invalid request or sensor identity'}, None
     except (socket.timeout, TimeoutError):
         return 408, {'error': 'Request timed out'}, None

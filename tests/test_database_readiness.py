@@ -13,6 +13,9 @@ SCRIPTS=ROOT/'scripts/database'
 sys.path.insert(0,str(SCRIPTS))
 import schema_contract
 import weather_role
+import schema_contract_rollups
+import nas_rollups_apply
+import nas_owner_apply
 
 
 class DatabaseReadinessTests(unittest.TestCase):
@@ -46,7 +49,7 @@ class SyntheticPostgresTests(unittest.TestCase):
         import psycopg
         from psycopg import sql
         with psycopg.connect(host='127.0.0.1',port=55439,dbname='my_pa',user='my_pa') as owner:
-            schema_contract.assert_shape(owner.execute)
+            schema_contract_rollups.assert_shape(owner.execute)
             # Isolated ownerchain predecessor marker is synthetic; no canonical history claim.
             owner.execute('CREATE TABLE IF NOT EXISTS public.alembic_version(version_num text NOT NULL)')
             owner.execute('TRUNCATE public.alembic_version')
@@ -55,7 +58,7 @@ class SyntheticPostgresTests(unittest.TestCase):
                 owner.execute('CREATE ROLE weather_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS')
                 owner.execute('GRANT CONNECT ON DATABASE my_pa TO weather_runtime')
                 owner.execute('GRANT USAGE ON SCHEMA weather TO weather_runtime')
-                for table,privileges in weather_role.TABLES.items():
+                for table,privileges in nas_rollups_apply.ROLLUP_TABLES.items():
                     owner.execute(sql.SQL('GRANT '+privileges+' ON weather.{} TO weather_runtime').format(sql.Identifier(table)))
             if not owner.execute("SELECT 1 FROM pg_roles WHERE rolname='weather_forecast'").fetchone():
                 owner.execute('CREATE ROLE weather_forecast LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS')
@@ -63,17 +66,19 @@ class SyntheticPostgresTests(unittest.TestCase):
                 owner.execute('GRANT USAGE ON SCHEMA weather TO weather_forecast')
                 owner.execute('GRANT SELECT,INSERT,UPDATE ON weather.forecast_cache TO weather_forecast')
             owner.execute('CREATE TABLE IF NOT EXISTS public.synthetic_owner_fact(id integer)')
-            weather_role.verify(owner,'weather_runtime')
+            owner.execute(nas_owner_apply.role_guard('weather_runtime',nas_rollups_apply.ROLLUP_TABLES))
             owner.commit()
             owner.execute('GRANT SELECT ON public.synthetic_owner_fact TO weather_runtime')
-            with self.assertRaises(ValueError):weather_role.verify(owner,'weather_runtime')
+            with self.assertRaises(psycopg.errors.RaiseException):owner.execute(nas_owner_apply.role_guard('weather_runtime',nas_rollups_apply.ROLLUP_TABLES))
             owner.rollback()
             owner.execute('ALTER ROLE weather_runtime INHERIT')
-            with self.assertRaises(ValueError):weather_role.verify(owner,'weather_runtime')
+            with self.assertRaises(psycopg.errors.RaiseException):owner.execute(nas_owner_apply.role_guard('weather_runtime',nas_rollups_apply.ROLLUP_TABLES))
             owner.rollback()
             owner.execute('ALTER TABLE weather.locations ADD COLUMN drift text')
-            with self.assertRaises(ValueError):schema_contract.assert_shape(owner.execute)
+            with self.assertRaises(ValueError):schema_contract_rollups.assert_shape(owner.execute)
             owner.rollback()
+        from weather.store import PostgresStore
+        self.assertTrue(PostgresStore('postgresql://weather_runtime@127.0.0.1:55439/my_pa','nonproduction').check_ready())
         with psycopg.connect(host='127.0.0.1',port=55439,dbname='my_pa',user='weather_runtime',autocommit=True) as runtime:
             runtime.execute("INSERT INTO weather.locations VALUES ('synthetic-readiness','{}') ON CONFLICT DO NOTHING")
             self.assertEqual(runtime.execute("SELECT count(*) FROM weather.locations WHERE id='synthetic-readiness'").fetchone()[0],1)
@@ -99,7 +104,22 @@ class SyntheticPostgresTests(unittest.TestCase):
             conn.exec_driver_sql('DROP SCHEMA weather CASCADE')  # transaction rolls back owned fixture only
             with Operations.context(MigrationContext.configure(conn)):
                 module.upgrade()  # same frozen revision from absent weather schema
-            schema_contract.assert_shape(conn.exec_driver_sql)
+            schema_contract.assert_shape(conn.exec_driver_sql) # original frozen seven-table contract
+            # Exercise the frozen7 owner ACL/catalog adapter before the additive
+            # follow-on, rather than weakening its historical assertions to8.
+            conn.exec_driver_sql('GRANT USAGE ON SCHEMA weather TO weather_runtime,weather_forecast')
+            for table,privileges in weather_role.TABLES.items():
+                conn.exec_driver_sql('GRANT '+privileges+' ON weather.'+table+' TO weather_runtime')
+            conn.exec_driver_sql('GRANT SELECT,INSERT,UPDATE ON weather.forecast_cache TO weather_forecast')
+            conn.exec_driver_sql((nas_owner_apply.shape_guard()+nas_owner_apply.privilege_guard()).replace('%','%%'))
+            followon=migration.with_name('20261023_f8b21e4d6c90_weather_rollups.py')
+            spec=importlib.util.spec_from_file_location('synthetic_rollup_migration',followon)
+            rollup=importlib.util.module_from_spec(spec);spec.loader.exec_module(rollup)
+            with Operations.context(MigrationContext.configure(conn)):
+                rollup.upgrade()
+            conn.exec_driver_sql('GRANT SELECT,INSERT,UPDATE ON weather.observation_rollups TO weather_runtime')
+            schema_contract_rollups.assert_shape(conn.exec_driver_sql)
+            conn.exec_driver_sql(nas_owner_apply.role_guard('weather_runtime',nas_rollups_apply.ROLLUP_TABLES).replace('%','%%'))
             self.assertEqual(before,conn.exec_driver_sql('SELECT version_num FROM public.alembic_version').fetchall())
             with Operations.context(MigrationContext.configure(conn)),self.assertRaises(RuntimeError):module.downgrade()
             transaction.rollback()
@@ -109,7 +129,7 @@ class SyntheticPostgresTests(unittest.TestCase):
         import nas_owner_apply
         import psycopg
         from types import SimpleNamespace
-        verify=nas_owner_apply.build_sql(SimpleNamespace(expected_alembic='b9025e7fb738'),'',None)
+        verify=nas_rollups_apply.build_sql('b9025e7fb738','',False)
         with psycopg.connect(host='127.0.0.1',port=55439,dbname='my_pa',user='my_pa',autocommit=True) as conn:
             conn.execute(verify)
             for drift in ('GRANT SELECT ON public.synthetic_owner_fact TO PUBLIC',
@@ -119,7 +139,7 @@ class SyntheticPostgresTests(unittest.TestCase):
                           'GRANT SELECT ON weather.observations TO weather_forecast'):
                 conn.execute('BEGIN')
                 conn.execute(drift)
-                with self.subTest(drift=drift),self.assertRaises(psycopg.errors.RaiseException):conn.execute(nas_owner_apply.privilege_guard())
+                with self.subTest(drift=drift),self.assertRaises(psycopg.errors.RaiseException):conn.execute(nas_owner_apply.role_guard('weather_runtime',nas_rollups_apply.ROLLUP_TABLES)+nas_owner_apply.role_guard('weather_forecast',nas_owner_apply.FORECAST_TABLES))
                 conn.execute('ROLLBACK')
 
     def test_z_forecast_role_cache_only(self):
@@ -128,5 +148,5 @@ class SyntheticPostgresTests(unittest.TestCase):
             # Does not need location-table SELECT to write an existing location FK.
             conn.execute("INSERT INTO weather.forecast_cache VALUES ('synthetic-readiness','{}') ON CONFLICT(location_id) DO UPDATE SET payload=EXCLUDED.payload")
             self.assertIsNotNone(conn.execute("SELECT payload FROM weather.forecast_cache WHERE location_id='synthetic-readiness'").fetchone())
-            for statement in ('SELECT * FROM weather.observations','SELECT * FROM weather.locations','INSERT INTO weather.locations VALUES (\'forbidden\',\'{}\')','DELETE FROM weather.forecast_cache','CREATE TABLE weather.forbidden(id int)','SELECT * FROM public.synthetic_owner_fact'):
+            for statement in ('SELECT * FROM weather.observation_rollups','SELECT * FROM weather.observations','SELECT * FROM weather.locations','INSERT INTO weather.locations VALUES (\'forbidden\',\'{}\')','DELETE FROM weather.forecast_cache','CREATE TABLE weather.forbidden(id int)','SELECT * FROM public.synthetic_owner_fact'):
                 with self.subTest(statement=statement),self.assertRaises(psycopg.errors.InsufficientPrivilege):conn.execute(statement)

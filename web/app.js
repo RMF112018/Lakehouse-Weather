@@ -3,7 +3,7 @@
   const signout=document.getElementById('signout');
   if(signout) signout.addEventListener('click',async()=>{signout.disabled=true;try{const status=await fetch('./api/auth/status',{cache:'no-store'});const data=await status.json();if(!data.authenticated){location.replace('./login');return;}const out=await fetch('./api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json','X-Weather-CSRF':data.csrf},body:'{}'});if(out.ok)location.replace('./login');else throw Error();}catch{signout.disabled=false;signout.textContent='Try sign out again';}});
   const $ = id => document.getElementById(id);
-  const state = { data: null, location: null, station: null, unit: 'F', hours: 24, metric: 'temperature_c', history: null, request: 0 };
+  const state = { data: null, location: null, station: null, unit: 'F', range: '24h', metric: 'temperature_c', history: null, request: 0, historyError: '' };
   try { state.unit = localStorage.getItem('weatherhouse-unit') === 'C' ? 'C' : 'F'; } catch (_) { /* Private browsing can disable storage. */ }
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const number = (value, digits = 0) => finite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '—';
@@ -32,6 +32,31 @@
     if (minutes < 1) return 'Just updated';
     return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)}h ago`;
   }
+  function unitFor(sensor) {
+    const key = sensor.key || '';
+    if (key.endsWith('_c')) return `°${state.unit}`;
+    if (key.endsWith('_ms')) return speedUnit();
+    if (key.endsWith('_mm')) return rainUnit();
+    if (key.endsWith('_hpa')) return state.unit === 'F' ? 'inHg' : 'hPa';
+    return sensor.unit || '';
+  }
+  function converted(value, sensor) {
+    const key = sensor.key || '';
+    if (!finite(value)) return value;
+    if (key.endsWith('_c')) return state.unit === 'F' ? value * 9 / 5 + 32 : value;
+    if (key.endsWith('_ms')) return value * (state.unit === 'F' ? 2.23694 : 3.6);
+    if (key.endsWith('_mm')) return state.unit === 'F' ? value / 25.4 : value;
+    if (key.endsWith('_hpa')) return state.unit === 'F' ? value / 33.8639 : value;
+    return value;
+  }
+  function sensorValue(value, sensor, includeUnit = true) {
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'boolean') return value ? (sensor.true_label || 'Yes') : (sensor.false_label || 'No');
+    if (!finite(value)) return String(value);
+    const key = sensor.key || ''; const digits = key.endsWith('_mm') && state.unit === 'F' ? sensor.kind === 'accumulation' ? 3 : 2 : key.endsWith('_hpa') && state.unit === 'F' ? 2 : 1;
+    return `${number(converted(value, sensor), digits)}${includeUnit && unitFor(sensor) ? ` ${unitFor(sensor)}` : ''}`;
+  }
+  function description(sensor) { return sensor.description || sensor.aggregation || 'Reported by your station'; }
   const icons = {
     sun: '<circle cx="24" cy="24" r="9"/><path d="M24 3v5m0 32v5M3 24h5m32 0h5M9 9l4 4m22 22 4 4M9 39l4-4m22-22 4-4"/>',
     cloud: '<path d="M12 35a8 8 0 0 1-1-16 12 12 0 0 1 23-2 9 9 0 0 1 1 18Z"/>',
@@ -57,7 +82,7 @@
   }
   async function api(path) {
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 15000);
-    try { const response = await fetch(`./api/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' }, cache: 'no-store' }); if(response.status===401){location.replace('./login');throw new Error('Please sign in again.');} if (!response.ok) throw new Error(`Weather service returned ${response.status}.`); return await response.json(); }
+    try { const response = await fetch(`./api/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' }, cache: 'no-store' }); if(response.status===401){location.replace('./login');throw new Error('Please sign in again.');} if (!response.ok) { let detail; try { const body = await response.json(); detail = typeof body.error === 'string' ? body.error.slice(0, 300) : null; } catch (_) {} if (detail === 'Local time is ambiguous or nonexistent; specify explicit UTC bounds') detail = 'This local time is ambiguous or does not exist because of daylight saving. Choose another local time.'; throw new Error(detail || `Weather service returned ${response.status}.`); } return await response.json(); }
     finally { clearTimeout(timeout); }
   }
   function message(text) { $('error').hidden = !text; set('error', text); }
@@ -68,8 +93,10 @@
       if (!Array.isArray(data.locations)) throw new Error('The weather service returned an unexpected response.');
       state.data = data;
       if(signout)signout.hidden=data.mode==='demo';
+      const previousStation = state.station?.id;
       state.location = data.locations.find(l => l.id === state.location?.id) || data.locations[0] || null;
       state.station = state.location?.stations?.find(s => s.id === state.station?.id) || state.location?.stations?.[0] || null;
+      if (state.station?.id !== previousStation) selectStationMetric();
       state.request++; state.history = null;
       $('loading').hidden = true; $('content').hidden = !state.location;
       if (!state.location) message('No locations are configured yet. Add a location and its weather station to get started.');
@@ -77,7 +104,7 @@
       set('notice', 'DEMO MODE · Illustrative weather data. These are sample locations and readings, not live observations from your WS-2000.');
       set('connection-text', data.mode === 'demo' ? 'Exploring sample weather' : 'Connected to your weather service');
       set('footer-status', data.mode === 'demo' ? 'Sample data · Nonproduction preview' : 'Your stations. Your data.');
-      if (state.location) { render(); if (state.hours !== 24) await loadHistory(); }
+      if (state.location) { render(); await loadHistory(); }
     } catch (error) { $('loading').hidden = true; message(`${error.name === 'AbortError' ? 'The weather service took too long to respond.' : error.message} Use refresh to try again.${state.data ? ' Previously loaded readings remain visible.' : ''}`); set('connection-text', 'Weather service unavailable'); }
     finally { $('refresh').disabled = false; $('main').setAttribute('aria-busy', 'false'); }
   }
@@ -87,7 +114,7 @@
       const stations = location.stations || []; const first = stations[0]; const button = node('button', 'location-card'); button.type = 'button'; button.setAttribute('aria-pressed', String(location.id === state.location.id));
       const text = node('span'); text.append(node('span', 'location-name', location.name), node('span', 'location-sub', `${stations.length} ${stations.length === 1 ? 'station' : 'stations'} · ${first ? first.stale ? 'Stale readings' : 'Reporting' : 'Not connected'}`));
       button.append(text, node('span', 'location-temp', `${temp(first?.observation?.temperature_c)}°`));
-      button.addEventListener('click', () => { state.location = location; state.station = stations[0] || null; state.history = null; state.request++; $('chart').classList.remove('loading-state'); render(); if (state.hours !== 24) loadHistory(); }); $('locations').append(button);
+      button.addEventListener('click', () => { state.location = location; state.station = stations[0] || null; selectStationMetric(); state.history = null; state.request++; $('chart').classList.remove('loading-state'); render(); loadHistory(); }); $('locations').append(button);
     }
   }
   function render() {
@@ -95,12 +122,12 @@
     renderLocations();
     set('location-title', state.location.name); set('location-region', `${state.location.timezone || 'UTC'} · LOCAL OBSERVATIONS`);
     const select = $('station-select'); select.replaceChildren(); for (const station of state.location.stations || []) { const option = node('option', '', station.name); option.value = station.id; option.selected = station.id === state.station?.id; select.append(option); } select.disabled = !state.station;
-    renderStationComparison(); renderConditions(); renderChart(); renderForecast();
+    renderStationComparison(); renderConditions(); renderSensors(); renderMetricOptions(); renderChart(); renderForecast();
   }
   function chooseStation(station) {
-    state.station = station; state.history = null; state.request++;
+    state.station = station; selectStationMetric(); state.history = null; state.request++;
     $('chart').classList.remove('loading-state');
-    render(); if (state.hours !== 24) loadHistory();
+    render(); loadHistory();
   }
   function renderStationComparison() {
     const stations = state.location.stations || []; const root = $('station-comparison'); root.replaceChildren(); root.hidden = stations.length < 2;
@@ -114,57 +141,164 @@
   function renderConditions() {
     const station = state.station; const obs = station?.observation || {}; const forecast = state.location.forecast;
     set('updated', obs.observed_at ? `Observed ${formatDate(obs.observed_at, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · ${age(obs.observed_at)}` : 'Waiting for the first observation');
-    const temperature = node('span', '', temp(obs.temperature_c)); temperature.append(node('small', '', `°${state.unit}`)); $('temperature').replaceChildren(temperature);
+    const sensors = currentSensors(); let heroSensor; const hasTemperature = finite(obs.temperature_c);
+    $('temperature').classList.toggle('sensor-hero', !hasTemperature);
+    if (hasTemperature) { const temperature = node('span', '', temp(obs.temperature_c)); temperature.append(node('small', '', `°${state.unit}`)); $('temperature').replaceChildren(temperature); }
+    else {
+      const key = ['detector_state', 'lightning_distance_km', 'lightning_count_raw', 'battery_ok'].find(item => obs[item] !== null && obs[item] !== undefined) || sensors[0]?.key;
+      heroSensor = sensors.find(item => item.key === key);
+      set('temperature', heroSensor ? sensorValue(obs[key], heroSensor) : 'No readings');
+    }
     const today = forecast?.daily?.find(day => day.date === localCalendarDate(state.location.timezone));
     const currentWeather = weather(today?.weather_code);
-    set('condition-label', finite(obs.temperature_c) ? 'Outside, right now' : 'Awaiting station data');
-    set('hero-detail', today ? `Today’s forecast: ${currentWeather.label.toLowerCase()}` : 'Local measurements from your weather station');
-    $('hero-icon').replaceChildren(icon(currentWeather.icon));
+    set('condition-label', hasTemperature ? 'Latest temperature' : heroSensor ? heroSensor.label : 'Awaiting station data');
+    set('hero-detail', hasTemperature && today ? `Today’s forecast: ${currentWeather.label.toLowerCase()}` : sensors.length ? `${hasTemperature ? 'Reported by' : station?.stale ? 'Latest sensor report ·' : 'Live sensor data ·'} ${station?.model || 'your station'}` : 'Local measurements from your weather station');
+    $('hero-icon').replaceChildren(icon(hasTemperature ? currentWeather.icon : 'gauge'));
     set('station-health', !station ? 'No station' : station.stale ? '● Stale reading' : '● Station reporting'); $('station-health').classList.toggle('stale', !station || station.stale);
     set('station-model', station ? `${station.model || 'Weather station'} · ${station.name}` : 'No station configured');
-    set('battery', obs.battery_ok === false ? 'Battery low' : obs.battery_ok === true ? 'Battery healthy' : 'Battery status unknown');
-    const direction = finite(obs.wind_direction_deg) ? ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(obs.wind_direction_deg / 45) % 8] : 'Direction unavailable';
-    $('metrics').replaceChildren(
-      metric('Humidity', number(obs.humidity_pct), '%', 'Relative humidity', 'drop'),
-      metric('Wind', speed(obs.wind_speed_ms), speedUnit(), `${direction} · Gusts ${speed(obs.wind_gust_ms)} ${speedUnit()}`, 'wind'),
-      metric('Rainfall', rain(obs.rain_interval_mm), rainUnit(), 'Latest measurement interval', 'rain'),
-      metric('Pressure', state.unit === 'F' ? finite(obs.pressure_hpa) ? number(obs.pressure_hpa / 33.8639, 2) : '—' : number(obs.pressure_hpa, 1), state.unit === 'F' ? 'inHg' : 'hPa', 'Station pressure', 'gauge')
-    );
+    set('battery', obs.battery_ok === false ? 'Battery low' : obs.battery_ok === true ? 'Battery healthy' : finite(obs.battery_level) ? `Decoder battery level ${number(obs.battery_level, 2)}` : 'Battery status unknown');
+    const priorities = ['humidity_pct', 'wind_speed_ms', 'rain_interval_mm', 'rain_total_mm', 'pressure_hpa', 'wind_gust_ms'];
+    const featured = sensors.filter(sensor => sensor.key !== 'temperature_c' || sensors.length === 1).sort((a, b) => { const rank = key => priorities.includes(key) ? priorities.indexOf(key) : 99; return rank(a.key) - rank(b.key); }).slice(0, 4);
+    $('metrics').replaceChildren(...featured.map(sensor => metric(sensor.label, sensorValue(obs[sensor.key], sensor, false), unitFor(sensor), description(sensor), sensor.key.includes('wind') ? 'wind' : sensor.key.includes('rain') ? 'rain' : sensor.key.includes('humidity') ? 'drop' : 'gauge')));
+    if (!featured.length) $('metrics').append(node('p', 'empty', 'Sensor readings will appear after your first station transmission.'));
   }
+  function catalog() {
+    return Object.entries(state.data?.sensor_catalog || {}).map(([key, spec]) => ({ ...spec, key }));
+  }
+  function currentSensors() {
+    const observation = state.station?.observation || {};
+    return catalog().filter(sensor => observation[sensor.key] !== null && observation[sensor.key] !== undefined);
+  }
+  function selectStationMetric() {
+    const sensors = currentSensors();
+    if (!sensors.some(sensor => sensor.key === state.metric)) state.metric = sensors.find(sensor => sensor.kind !== 'status')?.key || sensors[0]?.key || state.metric;
+  }
+  function semanticNote(sensor) {
+    const notes = { accumulation: 'Known rainfall only: measured increments, with unknown intervals excluded. Resets and gaps can hide rain; this is not a complete period total.', maximum: 'Maximum reported gust within each history bucket.', circular: 'Circular mean direction; north wraps at 360°.', cumulative_counter: 'Cumulative device counter. Not a daily total; resets are possible.', raw_counter: 'Raw device counter, 0–255. Wraps or resets; not an hourly or daily strike count.', status: 'Reported status. History shows last state in each bucket, not a numerical average.' };
+    return notes[sensor.kind] || (sensor.key === 'battery_level' ? 'Decoder-reported level, not charge percentage or voltage.' : sensor.key === 'uv_raw' ? 'Raw UV sensor units; not the UV index.' : sensor.key === 'illuminance_lux' ? 'Visible light in lux; not solar irradiance in W/m².' : sensor.key === 'lightning_distance_km' ? 'Last reported strike distance; not a current storm position.' : 'History: mean of available readings within each bucket.');
+  }
+  function renderSensors() {
+    const obs = state.station?.observation || {};
+    const sensors = [...currentSensors(), ...catalog().filter(sensor => (obs[sensor.key] === null || obs[sensor.key] === undefined) && obs.unavailable_reasons?.[sensor.key])];
+    set('sensor-count', `${sensors.length} reported fields`); $('sensor-details').replaceChildren();
+    for (const sensor of sensors) {
+      const group = node('div', 'sensor-reading'); const value = node('dd', '', sensorValue(obs[sensor.key], sensor, false));
+      if (unitFor(sensor)) value.append(node('small', '', unitFor(sensor)));
+      group.append(node('dt', '', sensor.label), value, node('p', '', `${obs.unavailable_reasons?.[sensor.key] ? `${obs.unavailable_reasons[sensor.key]}. ` : ''}${semanticNote(sensor)}${sensor.source_field ? ` Source: ${sensor.source_field}.` : ''}`)); $('sensor-details').append(group);
+    }
+    if (!sensors.length) $('sensor-details').append(node('p', 'empty', 'No sensor measurements have been received yet.'));
+    const known = new Set(catalog().map(sensor => sensor.source_field)); const extras = obs.raw_rf && typeof obs.raw_rf === 'object' && !Array.isArray(obs.raw_rf) ? Object.entries(obs.raw_rf) : [];
+    const secret = /auth|token|secret|password|passwd|credential|cookie|session|api.?key|private.?key|dsn|connection.?string/i;
+    function safeExtra(value, depth = 0) {
+      if (depth > 4) return '[omitted]';
+      if (typeof value === 'string') return /bearer\s|postgres(?:ql)?:\/\/|-----BEGIN .*PRIVATE KEY/i.test(value) ? '[redacted]' : value.slice(0, 256);
+      if (Array.isArray(value)) return value.slice(0, 32).map(item => safeExtra(item, depth + 1));
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([key]) => !secret.test(key)).slice(0, 64).map(([key, item]) => [key, safeExtra(item, depth + 1)]));
+      return value;
+    }
+    const safe = extras.filter(([key]) => !secret.test(key) && !known.has(key));
+    $('extras-disclosure').hidden = !safe.length; $('sensor-extras').replaceChildren();
+    for (const [key, value] of safe) { const cleaned = safeExtra(value); $('sensor-extras').append(node('dt', '', key), node('dd', '', typeof cleaned === 'object' ? JSON.stringify(cleaned) : String(cleaned))); }
+    if (safe.length && obs.provenance) $('sensor-extras').append(node('dt', '', 'Provenance'), node('dd', '', JSON.stringify(safeExtra(obs.provenance))));
+  }
+  function renderMetricOptions() {
+    const available = new Set(currentSensors().map(sensor => sensor.key));
+    const sensors = catalog();
+    if (!sensors.some(sensor => sensor.key === state.metric)) state.metric = sensors.find(sensor => sensor.kind !== 'status')?.key || sensors[0]?.key || '';
+    $('metric-select').replaceChildren();
+    for (const sensor of sensors) { const option = node('option', '', `${sensor.label}${sensor.kind === 'status' ? ' · status' : ''}${available.has(sensor.key) ? '' : ' (no latest reading)'}`); option.value = sensor.key; option.selected = sensor.key === state.metric; $('metric-select').append(option); }
+    $('metric-select').disabled = !sensors.length;
+    $('range-select').value = state.range;
+    $('custom-range').hidden = state.range !== 'custom';
+    set('custom-timezone', `Dates in ${state.location.timezone || 'UTC'} (this location’s timezone).`);
+  }
+  function selectedSensor() { return catalog().find(sensor => sensor.key === state.metric) || { key: state.metric, label: state.metric, kind: 'gauge', unit: '' }; }
+  function resolutionLabel(seconds) {
+    if (!finite(seconds)) return 'Unknown resolution';
+    const size = seconds >= 86400 ? 86400 : seconds >= 3600 ? 3600 : seconds >= 60 ? 60 : 1;
+    const unit = size === 86400 ? 'day' : size === 3600 ? 'hour' : size === 60 ? 'minute' : 'second';
+    return `${number(seconds / size, 1)}-${unit} summaries`;
+  }
+  function bucketBounds(point, data) {
+    const start = Math.max(new Date(data.start).getTime(), new Date(point.observed_at).getTime());
+    const end = Math.min(new Date(data.end).getTime(), new Date(point.observed_at).getTime() + data.bucket_seconds * 1000);
+    return { start, end };
+  }
+  function historyError(text) { state.historyError = text; set('history-error', text); $('history-error').hidden = !text; }
   async function loadHistory() {
-    if (!state.station) return;
-    const request = ++state.request; const station = state.station.id; const hours = state.hours;
-    $('chart').classList.add('loading-state'); set('chart-readout', 'Loading history…');
+    const request = ++state.request;
+    historyError(''); $('chart').classList.remove('loading-state'); $('chart').setAttribute('aria-busy', 'false');
+    if (!state.station || !state.metric) { state.history = null; renderChart(); return; }
+    if (state.range === 'custom' && (!$('history-start').value || !$('history-end').value)) { state.history = null; renderChart(); return; }
+    const params = new URLSearchParams({ station_id: state.station.id, range: state.range, metric: state.metric, max_points: '600' });
+    if (state.range === 'custom') { params.set('local_start', $('history-start').value); params.set('local_end', $('history-end').value); params.set('timezone', state.location.timezone || 'UTC'); }
+    state.history = null; historyError(''); renderChart(); $('chart').classList.add('loading-state'); $('chart').setAttribute('aria-busy', 'true'); set('chart-readout', 'Loading history…');
     try {
-      const response = await api(`history?station_id=${encodeURIComponent(station)}&hours=${hours}`);
+      const response = await api(`history?${params}`);
       if (request !== state.request) return;
-      const points = Array.isArray(response) ? response : response.history || response.observations || [];
-      if (!Array.isArray(points)) throw new Error('Unexpected history response.');
-      state.history = points; renderChart();
-    } catch (_) { if (request === state.request) { state.history = []; renderChart(); set('chart-readout', 'History could not be loaded. Change the range or refresh to try again.'); } }
-    finally { if (request === state.request) $('chart').classList.remove('loading-state'); }
+      if (!Array.isArray(response.points)) throw new Error('The weather service returned an unexpected history response.');
+      state.history = response; renderChart();
+    } catch (error) { if (request === state.request) { state.history = null; renderChart(); historyError(`${error.name === 'AbortError' ? 'History took too long to load.' : error.message} Change the range or refresh to try again.`); } }
+    finally { if (request === state.request) { $('chart').classList.remove('loading-state'); $('chart').setAttribute('aria-busy', 'false'); } }
   }
   function renderChart() {
-    $('hours24').setAttribute('aria-pressed', String(state.hours === 24)); $('hours48').setAttribute('aria-pressed', String(state.hours === 48));
-    const convert = value => state.metric === 'temperature_c' ? state.unit === 'F' ? value * 9 / 5 + 32 : value : state.metric === 'wind_speed_ms' ? value * (state.unit === 'F' ? 2.23694 : 3.6) : value;
-    const unit = state.metric === 'temperature_c' ? `°${state.unit}` : state.metric === 'humidity_pct' ? '%' : speedUnit();
-    const raw = state.history ?? state.station?.history ?? [];
-    const end = raw.reduce((max, p) => Math.max(max, new Date(p.observed_at).getTime() || 0), 0);
-    const points = raw.filter(p => finite(p[state.metric]) && Number.isFinite(new Date(p.observed_at).getTime()) && new Date(p.observed_at).getTime() >= end - state.hours * 3600000).sort((a, b) => new Date(a.observed_at) - new Date(b.observed_at));
-    $('chart').replaceChildren(); set('history-current', points.length ? `${number(convert(points[points.length - 1][state.metric]), 1)}${unit}` : 'No readings yet');
-    set('history-range', `Past ${state.hours} hours · ${points.length} readings`); set('chart-readout', 'Select a point to see its reading.');
-    if (points.length < 2) { $('chart').append(node('p', 'empty', 'A little more history is needed to draw the day.')); return; }
-    const values = points.map(p => convert(p[state.metric])); let min = Math.min(...values), max = Math.max(...values); const padding = Math.max((max - min) * .25, 1); min -= padding; max += padding;
-    const width = Math.max(270, $('chart').clientWidth || 900), height = width < 500 ? 180 : 208, left = 37, right = 12, top = 17, bottom = 33;
-    const startTime = new Date(points[0].observed_at).getTime(); const endTime = new Date(points[points.length - 1].observed_at).getTime();
-    const xy = (p, i) => [left + ((new Date(p.observed_at).getTime() - startTime) / Math.max(endTime - startTime, 1)) * (width - left - right), top + (1 - (values[i] - min) / (max - min)) * (height - top - bottom)];
-    const svgNS = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(svgNS, 'svg'); svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', `${$('metric-select').selectedOptions[0].textContent} history, ${points.length} readings. Select a point for details.`);
+    const data = state.history; const sensor = selectedSensor(); const stats = data?.summary?.metrics?.[state.metric];
+    const valueOf = reading => !reading || !reading.count ? null : sensor.kind === 'accumulation' ? reading.sum : sensor.kind === 'maximum' ? reading.max : ['cumulative_counter', 'raw_counter', 'status'].includes(sensor.kind) ? reading.last : reading.mean;
+    const pointValue = point => valueOf(point.metrics?.[state.metric]);
+    const raw = data?.points || [];
+    const points = raw.filter(point => { const value = pointValue(point); return sensor.kind === 'status' ? value !== null && value !== undefined : finite(value); });
+    $('chart').replaceChildren(); $('history-stats').replaceChildren();
+    set('history-current', sensor.kind === 'accumulation' && stats?.count ? `${sensorValue(stats.sum, sensor)} known` : sensor.kind === 'accumulation' && data ? 'No measured rain intervals' : points.length ? sensorValue(pointValue(points[points.length - 1]), sensor) : stats?.count ? 'No defined bucket value' : 'No readings in this range');
+    const rangeLabel = $('range-select').selectedOptions[0]?.textContent || 'Selected range';
+    set('history-range', `${rangeLabel}${data ? ` · ${number(stats?.count || 0)} ${sensor.kind === 'accumulation' ? 'measured intervals' : 'sensor readings'}` : ''}`);
+    set('history-resolution', data ? resolutionLabel(data.bucket_seconds) : '');
+    set('chart-readout', data ? semanticNote(sensor) : state.range === 'custom' ? 'Choose dates and apply to explore a custom range.' : 'History will appear when measurements are available.');
+    set('history-bounds', data ? `Requested: ${formatDate(data.start, { dateStyle: 'medium', timeStyle: 'short' })} – ${formatDate(data.end, { dateStyle: 'medium', timeStyle: 'short' })}. Actual station observations: ${data.actual_start ? formatDate(data.actual_start, { dateStyle: 'medium', timeStyle: 'short' }) : 'none'} – ${data.actual_end ? formatDate(data.actual_end, { dateStyle: 'medium', timeStyle: 'short' }) : 'none'} (${data.timezone || state.location.timezone}). ${semanticNote(sensor)} Time span does not imply continuous sensor coverage.` : '');
+    if (data) {
+      const coverage = data.coverage || {};
+      const summaries = sensor.kind === 'accumulation' ? [['Known rainfall (partial)', stats?.count ? sensorValue(stats.sum, sensor) : 'No known intervals'], ['Unknown intervals', number(stats?.unknown_intervals)], ['Counter resets', number(stats?.reset_count)], ['Counter gaps', number(stats?.gap_count)], ['Measured intervals', number(stats?.count || 0)], ['Bucket coverage', `${number(coverage.populated_buckets)} / ${number(coverage.total_buckets)}`], ['Station time span', finite(coverage.temporal_span_fraction) ? `${number(coverage.temporal_span_fraction * 100, 1)}%` : '—'], ['Source bucket (UTC)', finite(data.source_resolution_seconds) ? resolutionLabel(data.source_resolution_seconds).replace(' summaries', '') : 'Unknown']] : [['Sensor readings', number(stats?.count || 0)], ['Lowest reading', sensor.kind === 'status' || sensor.kind === 'circular' ? 'Not linear' : sensorValue(stats?.min, sensor)], ['Highest reading', sensor.kind === 'status' || sensor.kind === 'circular' ? 'Not linear' : sensorValue(stats?.max, sensor)], ['Bucket coverage', `${number(coverage.populated_buckets)} / ${number(coverage.total_buckets)}`], ['First reading', sensorValue(stats?.first, sensor)], ['Last reading', sensorValue(stats?.last, sensor)], ['Station time span', finite(coverage.temporal_span_fraction) ? `${number(coverage.temporal_span_fraction * 100, 1)}%` : '—'], ['Source bucket (UTC)', finite(data.source_resolution_seconds) ? resolutionLabel(data.source_resolution_seconds).replace(' summaries', '') : 'Unknown']];
+      for (const [label, value] of summaries) { const group = node('div'); group.append(node('dt', '', label), node('dd', '', value)); $('history-stats').append(group); }
+    }
+    if (!points.length) { $('chart').append(node('p', 'empty', !state.metric ? 'Connect a station to explore its sensor history.' : sensor.kind === 'accumulation' ? 'No measured rain intervals. Unknown intervals are not assumed dry.' : stats?.count ? 'Source readings exist, but this aggregate is undefined. A circular mean can be undefined for opposing wind directions.' : 'No measurements are available for this selection.')); return; }
+    if (sensor.kind === 'status') {
+      const list = node('div', 'status-history');
+      for (const point of [...points].reverse()) { const row = node('div'); const reported = point.metrics[state.metric].last_at || bucketBounds(point, data).start; const time = node('time', '', formatDate(reported, { dateStyle: 'medium', timeStyle: 'short' })); time.dateTime = new Date(reported).toISOString(); row.append(time, node('span', '', sensorValue(pointValue(point), sensor))); list.append(row); } $('chart').append(list); return;
+    }
+    const values = points.map(point => converted(pointValue(point), sensor));
+    const envelope = points.flatMap(point => { const reading = point.metrics?.[state.metric]; return [reading?.min, reading?.max].filter(finite).map(value => converted(value, sensor)); });
+    let min = Math.min(...values, ...envelope), max = Math.max(...values, ...envelope); const padding = Math.max((max - min) * .18, Math.max(Math.abs(max), Math.abs(min)) * .03, .001); min -= padding; max += padding;
+    if (sensor.kind === 'circular') { min = 0; max = 360; }
+    if (sensor.kind === 'accumulation') min = 0;
+    const width = Math.max(270, $('chart').clientWidth || 900), height = width < 500 ? 210 : 230, left = 45, right = 13, top = 17, bottom = 40;
+    const startTime = new Date(data.start).getTime(), endTime = new Date(data.end).getTime();
+    const x = point => { const bounds = bucketBounds(point, data); return left + (((bounds.start + bounds.end) / 2 - startTime) / Math.max(endTime - startTime, 1)) * (width - left - right); };
+    const y = value => top + (1 - (value - min) / (max - min)) * (height - top - bottom);
+    const svgNS = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(svgNS, 'svg'); svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', `${sensor.label} history, ${points.length} populated buckets. Gaps indicate missing measurements. Select a point for details.`);
     const element = (tag, attrs, text) => { const el = document.createElementNS(svgNS, tag); for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value)); if (text !== undefined) el.textContent = text; svg.append(el); return el; };
-    for (let row = 0; row < 4; row++) { const y = top + row / 3 * (height - top - bottom); element('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'grid' }); element('text', { x: left - 9, y: y + 4, 'text-anchor': 'end' }, number(max - row / 3 * (max - min))); }
-    const path = points.map((p, i) => `${i ? 'L' : 'M'}${xy(p, i).join(',')}`).join(' ');
-    element('path', { d: `${path} L${width - right},${height - bottom} L${left},${height - bottom} Z`, fill: '#c9884b', 'fill-opacity': '.07', stroke: 'none' }); element('path', { d: path, fill: 'none', class: 'line' });
-    for (let tick = 0; tick < 5; tick++) { const time = startTime + tick / 4 * (endTime - startTime); element('text', { x: left + tick / 4 * (width - left - right), y: height - 8, 'text-anchor': tick === 0 ? 'start' : tick === 4 ? 'end' : 'middle' }, formatDate(time, { hour: 'numeric', minute: '2-digit' })); }
-    points.forEach((p, i) => { const [x, y] = xy(p, i); const label = `${formatDate(p.observed_at, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}: ${number(values[i], 1)}${unit}`; const point = element('circle', { cx: x, cy: y, r: 9, class: 'point', tabindex: '0', role: 'button', 'aria-label': label }); const show = () => set('chart-readout', label); point.addEventListener('focus', show); point.addEventListener('pointerenter', show); point.addEventListener('click', show); point.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show(); } }); });
+    const rows = sensor.kind === 'circular' ? 5 : 4;
+    const axisDigits = max - min >= 2 ? 1 : max - min >= .2 ? 2 : max - min >= .02 ? 3 : 4;
+    for (let row = 0; row < rows; row++) { const yy = top + row / (rows - 1) * (height - top - bottom); const value = max - row / (rows - 1) * (max - min); element('line', { x1: left, y1: yy, x2: width - right, y2: yy, class: 'grid' }); element('text', { x: left - 8, y: yy + 4, 'text-anchor': 'end' }, sensor.kind === 'circular' ? ['N', 'W', 'S', 'E', 'N'][row] : Math.abs(value) >= 10000 ? new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value) : number(value, axisDigits)); }
+    let path = '', previous = null;
+    for (const point of raw) {
+      const value = pointValue(point);
+      if (!finite(value)) { previous = null; continue; }
+      const time = new Date(point.observed_at).getTime();
+      const gap = !previous || time - previous.time > data.bucket_seconds * 1500 || sensor.kind === 'circular' && Math.abs(value - previous.value) > 180;
+      path += `${gap ? 'M' : 'L'}${x(point)},${y(converted(value, sensor))} `; previous = { time, value };
+      const reading = point.metrics?.[state.metric];
+      if (sensor.kind !== 'circular' && finite(reading?.min) && finite(reading?.max)) element('line', { x1: x(point), x2: x(point), y1: y(converted(reading.min, sensor)), y2: y(converted(reading.max, sensor)), class: 'envelope' });
+    }
+    if (sensor.kind !== 'accumulation') element('path', { d: path.trim(), fill: 'none', class: 'line' });
+    else for (const point of points) { const bounds = bucketBounds(point, data); const barWidth = Math.max(1, (bounds.end - bounds.start) / Math.max(endTime - startTime, 1) * (width - left - right) - 2); const value = converted(pointValue(point), sensor); element('rect', { x: x(point) - barWidth / 2, y: y(value), width: barWidth, height: Math.max(1, y(0) - y(value)), fill: '#c9884b', 'fill-opacity': '.55', stroke: 'none', 'aria-hidden': 'true' }); }
+    const duration = endTime - startTime; const ticks = width < 500 ? 3 : 5;
+    for (let tick = 0; tick < ticks; tick++) { const time = startTime + tick / (ticks - 1) * duration; const options = duration <= 86400000 ? { hour: 'numeric', minute: '2-digit' } : duration > 370 * 86400000 ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric' }; element('text', { x: left + tick / (ticks - 1) * (width - left - right), y: height - 12, 'text-anchor': tick === 0 ? 'start' : tick === ticks - 1 ? 'end' : 'middle' }, formatDate(time, options)); }
+    points.forEach((point, index) => {
+      const reading = point.metrics[state.metric]; const bounds = bucketBounds(point, data); const label = `Bucket ${formatDate(bounds.start, { dateStyle: 'medium', timeStyle: 'short' })} – ${formatDate(bounds.end, { dateStyle: 'medium', timeStyle: 'short' })}: ${sensorValue(pointValue(point), sensor)} · ${number(reading.count)} readings${sensor.kind === 'accumulation' ? ` · ${number(reading.unknown_intervals)} unknown intervals, ${number(reading.reset_count)} resets, ${number(reading.gap_count)} gaps` : sensor.kind !== 'circular' ? ` · min ${sensorValue(reading.min, sensor)}, max ${sensorValue(reading.max, sensor)}` : ' · circular mean'} · Observed ${formatDate(reading.first_at, { dateStyle: 'medium', timeStyle: 'short' })} – ${formatDate(reading.last_at, { dateStyle: 'medium', timeStyle: 'short' })}`;
+      element('circle', { cx: x(point), cy: y(values[index]), r: 2, fill: '#c9884b', stroke: 'none', 'aria-hidden': 'true' });
+      const circle = element('circle', { cx: x(point), cy: y(values[index]), r: 9, class: 'point', tabindex: index === 0 ? '0' : '-1', role: 'button', 'aria-label': label, 'data-point': index });
+      const show = () => set('chart-readout', label); circle.addEventListener('focus', show); circle.addEventListener('pointerenter', show); circle.addEventListener('click', () => { show(); circle.focus(); });
+      circle.addEventListener('keydown', event => { if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); const target = svg.querySelector(`[data-point="${Math.min(points.length - 1, Math.max(0, index + (event.key === 'ArrowRight' ? 1 : -1)))}"]`); if (target) target.focus(); } else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show(); } });
+    });
     $('chart').append(svg);
   }
   function renderForecast() {
@@ -178,8 +312,9 @@
   $('refresh').addEventListener('click', refresh);
   $('station-select').addEventListener('change', event => { chooseStation(state.location.stations.find(s => String(s.id) === event.target.value)); });
   for (const [id, unit] of [['fahrenheit', 'F'], ['celsius', 'C']]) $(id).addEventListener('click', () => { state.unit = unit; try { localStorage.setItem('weatherhouse-unit', unit); } catch (_) {} if (state.location) render(); });
-  for (const hours of [24, 48]) $(`hours${hours}`).addEventListener('click', () => { state.hours = hours; renderChart(); loadHistory(); });
-  $('metric-select').addEventListener('change', event => { state.metric = event.target.value; renderChart(); });
+  $('range-select').addEventListener('change', event => { state.range = event.target.value; state.history = null; state.request++; historyError(''); renderMetricOptions(); renderChart(); loadHistory(); });
+  $('custom-range').addEventListener('submit', event => { event.preventDefault(); if ($('history-start').value >= $('history-end').value) { historyError('The end must be later than the start.'); return; } loadHistory(); });
+  $('metric-select').addEventListener('change', event => { state.metric = event.target.value; state.history = null; loadHistory(); });
   let resizeTimer; window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.location) renderChart(); }, 120); });
   refresh();
 })();

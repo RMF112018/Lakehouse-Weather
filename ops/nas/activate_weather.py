@@ -41,8 +41,10 @@ def inspect(name, expression):
     return command([DOCKER, 'inspect', '--format', expression, name]).decode().strip()
 
 
-def identities(require_running=True):
+def identities(require_running=True, include_app=True):
     for name, (container_id, image) in CONTAINERS.items():
+        if name == APP and not include_app:
+            continue
         if inspect(name, '{{.Id}}') != container_id or inspect(name, '{{.Image}}') != image or (require_running and inspect(name, '{{.State.Status}}') != 'running'):
             raise ValueError('Ingress container identity/state drift')
     for key, (path, inode, uid, mode) in FILES.items():
@@ -175,7 +177,7 @@ def recover_runtime():
         command([DOCKER, 'restart', '--time', '30', CONNECTOR])
     except Exception:
         failures.append('connector')
-    identities(require_running=False)
+    identities(require_running=False, include_app=False)
     for name in (PROXY, CONNECTOR):
         if inspect(name, '{{.State.Status}}') != 'running':
             failures.append('not-running')
@@ -215,7 +217,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if os.geteuid() != 0 or digest(Path(__file__).read_bytes()) != args.reviewed_helper_sha:
         raise ValueError('Reviewed helper identity and root execution required')
-    identities(require_running=args.action != 'rollback')
+    identities(require_running=args.action != 'rollback', include_app=args.action != 'rollback')
     if args.action == 'prepare':
         if ROOT.exists():
             if (ROOT / 'validated').exists():
