@@ -27,6 +27,10 @@ services:
         source: ${WEATHER_INGEST_TOKEN_PATH:?Explicit ingest secret file required}
         target: /run/weather/ingest-token
         read_only: true
+      - type: bind
+        source: ${WEATHER_RF_JOURNAL_PATH:?Explicit private RF journal directory required}
+        target: /var/lib/weather-rf
+        read_only: false
     user: "10001:10001"
     read_only: true
     cap_drop: [ALL]

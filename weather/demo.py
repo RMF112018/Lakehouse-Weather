@@ -28,6 +28,8 @@ def build(now=None):
             # Five-minute synthetic outdoor samples make known rain intervals
             # visible without pretending hourly gaps provide measured increments.
             for step in range(577):
+                if step % 12 == 0:
+                    continue  # Existing hourly sample owns this synthetic timestamp.
                 elapsed=step/12
                 at=now-timedelta(hours=48-elapsed)
                 store.insert(location['stations'][0]['id'],{'observed_at':stamp(at),'temperature_c':round(17+5*math.sin(elapsed*math.pi/12),1),'humidity_pct':60,'wind_speed_ms':2,'wind_gust_ms':6.2,'wind_direction_deg':225,'rain_total_mm':round(max(0,min(5,elapsed-12))*.4,3),'uv_index':2,'uv_raw':145,'illuminance_lux':18000,'battery_ok':True,'provenance':{'transport':'synthetic','normalizer_version':2}})

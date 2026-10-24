@@ -63,10 +63,12 @@ def identity(image, head, tree):
         raise ValueError('PostgreSQL network attachment mismatch')
 
 
-def mount_path(value, secret=False):
+def mount_path(value, secret=False, directory=False):
     path = Path(value)
-    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+    if not path.is_absolute() or path.is_symlink() or not (path.is_dir() if directory else path.is_file()):
         raise ValueError('Explicit regular absolute mount path required')
+    if directory and (path.stat().st_uid != 10001 or stat.S_IMODE(path.stat().st_mode) != 0o700):
+        raise ValueError('RF journal requires UID 10001 and mode 0700')
     mode = path.stat().st_mode
     if mode & stat.S_IWOTH or (secret and mode & stat.S_IROTH):
         raise ValueError('Mount permissions too broad')
@@ -127,6 +129,7 @@ def main(argv=None):
         if any(member.get('Name') != APPS['forecast'] for member in members.values()):
             raise ValueError('Weather egress bridge has a foreign member')
     env = {**os.environ, 'WEATHER_IMAGE_ID': args.image_id,
+           'WEATHER_RF_JOURNAL_PATH': mount_path('/volume1/weather-dashboard/rf-journal', False, True),
            'WEATHER_REGISTRY_PATH': mount_path(args.registry),
            'WEATHER_DATABASE_URL_PATH': mount_path(args.database_url_file, True),
            'WEATHER_INGEST_TOKEN_PATH': mount_path(args.ingest_token_file, True),
@@ -134,7 +137,7 @@ def main(argv=None):
            'WEATHER_FORECAST_LOOP_PATH': mount_path(str(Path(__file__).with_name('forecast_loop.py')))}
     # sudo normally filters environment. Pass only non-secret mount paths and the
     # immutable image ID explicitly through env; secret contents never enter argv.
-    compose_env = ['WEATHER_IMAGE_ID', 'WEATHER_REGISTRY_PATH', 'WEATHER_DATABASE_URL_PATH', 'WEATHER_INGEST_TOKEN_PATH', 'WEATHER_FORECAST_LOOP_PATH', 'WEATHER_FORECAST_DATABASE_URL_PATH']
+    compose_env = ['WEATHER_RF_JOURNAL_PATH', 'WEATHER_IMAGE_ID', 'WEATHER_REGISTRY_PATH', 'WEATHER_DATABASE_URL_PATH', 'WEATHER_INGEST_TOKEN_PATH', 'WEATHER_FORECAST_LOOP_PATH', 'WEATHER_FORECAST_DATABASE_URL_PATH']
     # Synology exposes Compose as its separate reviewed absolute executable.
     # Do not discover an executable via PATH or assume docker compose exists.
     version = subprocess.run(['sudo', '-n', COMPOSE_BINARY, 'version', '--short'], capture_output=True, text=True)

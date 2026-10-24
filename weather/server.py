@@ -2,6 +2,8 @@
 import hmac
 import json
 import mimetypes
+import stat
+import math
 import os
 import socket
 from datetime import datetime, timezone, timedelta
@@ -11,17 +13,24 @@ from urllib.parse import parse_qs, urlsplit, unquote
 from . import forecast
 from .domain import normalize, stamp, utc, CATALOG
 from .history import request_range, HistoryCapacityError
-from .registry import resolve
+from .registry import admit, validate_registry
+from .composite import assemble
+from .store import ObservationConflict
 
 
 class Application:
-    def __init__(self, locations, store, mode='demo', token='', allow_ingest=False, auth=None):
-        self.locations, self.store, self.mode = locations, store, mode
+    def __init__(self, locations, store, mode='demo', token='', allow_ingest=False, auth=None, rf_status_path=None):
+        # Empty installations support authentication-only startup and readiness.
+        # File-backed registries retain their nonempty validation contract.
+        validated = [] if isinstance(locations, list) and not locations else validate_registry(locations)
+        self.locations, self.store, self.mode = validated, store, mode
         self.token = token
         self.auth = auth
+        self.rf_status_path = rf_status_path or ('/var/lib/weather-rf/status.json' if mode != 'demo' else None)
         if mode != 'demo' and auth is None:
             raise ValueError('Password authentication required')
         self.allow_ingest = allow_ingest
+        self.groups = {g['id']:(loc,g) for loc in locations for g in loc.get('physical_stations',[])}
         self.station_ids = {s['id'] for loc in locations for s in loc['stations']}
         self.station_zones = {s['id']:loc['timezone'] for loc in locations for s in loc['stations']}
 
@@ -35,13 +44,46 @@ class Application:
                 latest = self.store.latest(station['id'])
                 history = self.store.history_summary(station['id'], now-timedelta(hours=48), now, max_points=200, zone=location['timezone'])
                 stations.append({'id': station['id'], 'name': station['name'], 'model': station['model'], 'last_seen': latest['observed_at'] if latest else None, 'stale': latest is None or now - utc(latest['observed_at']) > timedelta(minutes=20), 'observation': latest, 'history': history['history'], 'history_summary': {key:history[key] for key in ('start','end','bucket_seconds','total_observations','coverage')}, 'available_metrics': [key for key in CATALOG if latest and latest.get(key) is not None]})
+            row['physical_stations'] = [assemble(group, location['stations'], self.store, now) for group in location.get('physical_stations',[])]
             row.update(stations=stations, forecast=forecast.cached(self.store, location['id'], now))
             locations.append(row)
-        return {'mode': self.mode, 'generated_at': stamp(now), 'locations': locations, 'sensor_catalog': CATALOG}
+        return {'rf_status':self.rf_status(now), 'mode': self.mode, 'generated_at': stamp(now), 'locations': locations, 'sensor_catalog': CATALOG}
 
-    def ingest(self, packet):
-        station_id = resolve(self.locations, packet)
-        observation = normalize(packet)
+    def rf_status(self, now):
+        result = {'status':'unknown'}
+        if not self.rf_status_path:
+            return result
+        try:
+            fd = os.open(self.rf_status_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as handle:
+                info = os.fstat(handle.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 32768:
+                    return result
+                raw = handle.read(32769)
+            if len(raw) > 32768:
+                return result
+            value = json.loads(raw)
+            if not isinstance(value,dict):
+                return result
+            for key in ('last_receipt_utc','last_commit_utc','updated_at_utc','generated_at_utc'):
+                if value.get(key) is not None:
+                    result[key] = stamp(utc(value[key]))
+            for key in ('accepted','rejected','duplicates','conflicts','pending_count','pending_bytes','oldest_pending_age_seconds'):
+                number = value.get(key)
+                if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= 1e18:
+                    result[key] = number
+            code = value.get('error_code')
+            if code in ('none','capacity','pending_age_limit','database_unavailable','observation_conflict','journal_full','journal_age_limit','store_unavailable','conflict','capture_stopped'):
+                result['error_code'] = code
+            at = result.get('updated_at_utc') or result.get('generated_at_utc') or result.get('last_receipt_utc')
+            result['status'] = 'unknown' if not at else 'stale_status' if not 0 <= (now-utc(at)).total_seconds() <= 120 else 'available'
+        except (OSError,ValueError,TypeError,UnicodeError):
+            return {'status':'unknown'}
+        return result
+
+    def ingest(self, packet, trusted_context=None):
+        station_id = admit(self.locations, packet, trusted_context)
+        observation = normalize(packet, trusted_context=trusted_context)
         return {'station_id': station_id, 'inserted': self.store.insert(station_id, observation)}
 
 
@@ -81,7 +123,16 @@ def dispatch(app, web_root, method, target, headers, stream):
                 return 200, app.dashboard(), None
             if parsed.path == '/api/history':
                 query = parse_qs(parsed.query, strict_parsing=True, max_num_fields=8)
-                station = query.get('station_id', [''])[0]
+                group_id = query.get('physical_station_id', [''])[0]
+                if group_id:
+                    if 'station_id' in query or len(query.get('physical_station_id',[])) != 1 or len(query.get('metric',[])) != 1 or group_id not in app.groups:
+                        raise ValueError('Invalid physical history selector')
+                    group = app.groups[group_id][1]
+                    station = group['metric_sources'].get(query['metric'][0])
+                    if not station:
+                        raise ValueError('Unsupported physical metric')
+                else:
+                    station = query.get('station_id', [''])[0]
                 if station not in app.station_ids:
                     return 400, {'error': 'Known station required'}, None
                 try:
@@ -91,6 +142,9 @@ def dispatch(app, web_root, method, target, headers, stream):
                     message = str(error) if str(error) in safe else 'Invalid history range or timestamp'
                     return 400, {'error':message}, None
                 result = app.store.history_summary(station,start,end,limit,metric,zone)
+                if group_id:
+                    result['resolved_source_station_id'] = station
+                    result['physical_station_id'] = group_id
                 if 'hours' in query:
                     result['hours'] = int(query['hours'][0])
                 return 200, result, None
@@ -123,6 +177,8 @@ def dispatch(app, web_root, method, target, headers, stream):
         if not isinstance(packet, dict):
             raise ValueError('Packet object required')
         return 200, app.ingest(packet), None
+    except ObservationConflict:
+        return 409, {'error':'Conflicting RF observation'}, None
     except HistoryCapacityError as error:
         return 422, {'error':str(error)}, None
     except (ValueError, TypeError, UnicodeError, RecursionError):

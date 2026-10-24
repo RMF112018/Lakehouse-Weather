@@ -87,7 +87,7 @@ def safe_rf(packet):
     return result
 
 
-def normalize(packet, now=None):
+def normalize(packet, now=None, trusted_context=None):
     if not isinstance(packet, dict):
         raise ValueError('Packet must be an object')
     raw = safe_rf(packet)
@@ -96,9 +96,16 @@ def normalize(packet, now=None):
     if (observed - now).total_seconds() > 300:
         raise ValueError('Timestamp is more than five minutes in the future')
     result = {'observed_at': stamp(observed)}
+    unavailable = {}
+    if packet.get('model') == 'Fineoffset-WH65B':
+        for raw_key, sentinel, targets in [('temperature_raw',0x7ff,['temperature_c']),('humidity_raw',0xff,['humidity_pct']),('uv_raw',0xffff,['uv_raw','uv_index']),('light_raw',0xffffff,['illuminance_lux'])]:
+            if type(packet.get(raw_key)) is int and packet[raw_key] == sentinel:
+                for target in targets:
+                    unavailable[target] = 'transmitter_invalid_sentinel'
+
     for target, spec in FIELDS.items():
         source, minimum, maximum = spec[:3]
-        value = packet.get(source)
+        value = None if target in unavailable else packet.get(source)
         if target == 'lightning_distance_km' and value == 63:
             value = None  # Six-bit no-valid-distance sentinel, retained in raw_rf.
             result.setdefault('unavailable_reasons', {})[target] = 'RF no-valid-distance sentinel (63)'
@@ -118,7 +125,7 @@ def normalize(packet, now=None):
     result['battery_ok'] = None if battery is None or battery == 0.5 else bool(battery)
     result['battery_level'] = float(battery) if lightning_battery and battery is not None else None
     for target, source in [('detector_state', 'state'), ('integrity', 'mic')]:
-        value = packet.get(source)
+        value = None if target in unavailable else packet.get(source)
         if value is not None and (not isinstance(value, str) or not 1 <= len(value) <= 32):
             raise ValueError('Invalid RF status')
         result[target] = value
@@ -128,8 +135,14 @@ def normalize(packet, now=None):
     result['detector_flags'] = flags
     if all(result.get(key) is None for key in CATALOG):
         raise ValueError('At least one supported measurement or status is required')
+    for target in FIELDS:
+        if result[target] is None:
+            result.setdefault('unavailable_reasons', {}).setdefault(target, unavailable.get(target, 'not_observed'))
     result['raw_rf'] = raw
     result['provenance'] = {'transport': 'rtl_433', 'model': raw.get('model'), 'sensor_id': raw.get('id'), 'timestamp': 'explicit_receiver_utc', 'normalizer_version': 2}
+    if trusted_context:
+        context = {key:trusted_context[key] for key in ('transport','decoder_build','receiver_received_at_utc') if key in trusted_context}
+        result['provenance'].update(safe_rf(context))
     result['rain_known_mm'] = None
     result['rain_interval_mm'] = None
     return result
