@@ -20,7 +20,10 @@ from .store import ObservationConflict
 
 class Application:
     def __init__(self, locations, store, mode='demo', token='', allow_ingest=False, auth=None, rf_status_path=None):
-        self.locations, self.store, self.mode = validate_registry(locations), store, mode
+        # Empty installations support authentication-only startup and readiness.
+        # File-backed registries retain their nonempty validation contract.
+        validated = [] if isinstance(locations, list) and not locations else validate_registry(locations)
+        self.locations, self.store, self.mode = validated, store, mode
         self.token = token
         self.auth = auth
         self.rf_status_path = rf_status_path or ('/var/lib/weather-rf/status.json' if mode != 'demo' else None)
