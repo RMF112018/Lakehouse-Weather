@@ -1,0 +1,26 @@
+# Nonproduction candidate only. Never joins my-pa networks or starts a database.
+# Build/install and NAS deployment are separate operator-controlled operations.
+name: lakehouse-weather-dashboard-demo
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
+    image: lakehouse-weather/dashboard:nonproduction
+    command: ["python", "-m", "weather", "serve", "--host", "0.0.0.0", "--port", "8765"]
+    environment:
+      WEATHER_MODE: demo
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "127.0.0.1:8765:8765"
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/dashboard', timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

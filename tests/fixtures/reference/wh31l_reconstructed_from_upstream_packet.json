@@ -1,0 +1,10 @@
+{
+  "model": "FineOffset-WH31L",
+  "id": 67016,
+  "battery_ok": 1.0,
+  "state": "strike",
+  "flags": 32856,
+  "storm_dist_km": 1,
+  "strike_count": 1,
+  "mic": "CRC"
+}

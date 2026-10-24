@@ -1,3 +1,9 @@
+# Current dashboard boundary
+
+The ADR-0002 dashboard defaults to loopback synthetic mode with no external request or persistent store. PostgreSQL is explicit nonproduction only, with a dedicated weather runtime role and owner-provisioned schema. Ingest requires a server-only bearer token and a configured sensor identity; demo ingest is disabled. Public ingress must allow only read dashboard routes and exclude machine ingest. Browser authentication/access protection is not yet commissioned. The HTTP server is nonproduction. No existing my-pa browser protection is inherited automatically.
+
+# Historical WeeWX deployment security notes
+
 # Security model
 
 ## Exposed surface

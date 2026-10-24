@@ -1,3 +1,9 @@
+# Current objective
+
+The 2026-10-23 operator objective supersedes the SQLite/WeeWX-only and RF-before-all-application-work requirements below. See ADR-0002 and docs/runbooks/dashboard-nonproduction.md. The multi-location demo is implemented independently of real RF commissioning. Production/storage/ingress admission remains gated.
+
+# Historical roadmap (retained for RF commissioning context)
+
 # Lakehouse Weather Roadmap
 
 ## Gate 0 — Repository scaffold

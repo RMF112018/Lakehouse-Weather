@@ -1,0 +1,127 @@
+# Additive NAS service only. No builds, databases, host ports or proxy changes.
+name: lakehouse-weather
+services:
+  dashboard:
+    image: ${WEATHER_IMAGE_ID:?Exact reviewed sha256 image ID required}
+    platform: linux/amd64
+    container_name: lakehouse-weather-dashboard
+    pull_policy: never
+    environment:
+      WEATHER_MODE: postgres
+      WEATHER_ALLOW_DATABASE: production
+      WEATHER_AUTH_ORIGIN: https://www.bobby-fetting.me
+      WEATHER_REGISTRY: /run/weather/stations.json
+      WEATHER_DATABASE_URL_FILE: /run/weather/database-url
+      WEATHER_INGEST_TOKEN_FILE: /run/weather/ingest-token
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - type: bind
+        source: ${WEATHER_REGISTRY_PATH:?Explicit registry path required}
+        target: /run/weather/stations.json
+        read_only: true
+      - type: bind
+        source: ${WEATHER_DATABASE_URL_PATH:?Explicit database secret file required}
+        target: /run/weather/database-url
+        read_only: true
+      - type: bind
+        source: ${WEATHER_INGEST_TOKEN_PATH:?Explicit ingest secret file required}
+        target: /run/weather/ingest-token
+        read_only: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    restart: unless-stopped
+    stop_grace_period: 40s
+    mem_limit: 256m
+    # NAS kernel 4.4 has no CPU CFS/PIDs controllers; use supported rlimits.
+    # nproc is a shared-UID ceiling, not a per-container process count.
+    ulimits:
+      nproc:
+        soft: 256
+        hard: 256
+      nofile:
+        soft: 256
+        hard: 256
+    logging:
+      driver: none
+    healthcheck:
+      # Private dependency probe: no HTTP authentication, session reads or setup requirement.
+      test: ["CMD", "python", "-c", "import os,sys\ntry:\n    os.kill(1, 0)\n    assert os.environ.get('WEATHER_MODE') == 'postgres'\n    from weather.__main__ import secret_setting\n    from weather.store import PostgresStore\n    PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE')).check_ready()\nexcept Exception:\n    sys.exit(1)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 40s
+    networks:
+      data-plane: {}
+      browser-origin:
+        aliases: [weather-dashboard]
+  forecast:
+    image: ${WEATHER_IMAGE_ID:?Exact reviewed sha256 image ID required}
+    platform: linux/amd64
+    container_name: lakehouse-weather-forecast
+    pull_policy: never
+    command: ["python", "/run/weather/forecast_loop.py"]
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    environment:
+      WEATHER_MODE: postgres
+      WEATHER_ALLOW_DATABASE: production
+      WEATHER_REGISTRY: /run/weather/stations.json
+      WEATHER_DATABASE_URL_FILE: /run/weather/database-url
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - type: bind
+        source: ${WEATHER_REGISTRY_PATH:?Explicit registry path required}
+        target: /run/weather/stations.json
+        read_only: true
+      - type: bind
+        source: ${WEATHER_FORECAST_DATABASE_URL_PATH:?Explicit forecast-only database secret file required}
+        target: /run/weather/database-url
+        read_only: true
+      - type: bind
+        source: ${WEATHER_FORECAST_LOOP_PATH:?Reviewed forecast loop required}
+        target: /run/weather/forecast_loop.py
+        read_only: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    restart: unless-stopped
+    stop_grace_period: 130s
+    mem_limit: 128m
+    # NAS kernel 4.4 has no CPU CFS/PIDs controllers; use supported rlimits.
+    # nproc is a shared-UID ceiling, not a per-container process count.
+    ulimits:
+      nproc:
+        soft: 256
+        hard: 256
+      nofile:
+        soft: 256
+        hard: 256
+    logging:
+      driver: none
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,time; s=json.load(open('/tmp/forecast-state.json')); assert s['last_success'] is not None and 0 <= time.time()-s['last_success'] < 21600 and 0 <= time.time()-s['last_attempt'] < 3900"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 150s
+    networks:
+      data-plane: {}
+      weather-egress: {}
+
+networks:
+  data-plane:
+    name: my-pa-nas-contract_data-plane
+    external: true
+  browser-origin:
+    name: my-pa-nas-contract_browser-origin
+    external: true
+  weather-egress:
+    name: lakehouse-weather-egress
+    driver: bridge
+    internal: false

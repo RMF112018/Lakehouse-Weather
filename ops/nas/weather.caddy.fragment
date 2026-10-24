@@ -1,0 +1,40 @@
+# INERT REVIEW FRAGMENT: insert inside the existing www.bobby-fetting.me site
+# only AFTER application password/session authentication is independently
+# verified fail-closed and the owner has completed hidden TTY password setup.
+# Keep existing /pa handlers. No Cloudflare Access dependency. Never import blindly.
+@weather_redirect {
+    method GET
+    path /weather
+}
+redir @weather_redirect /weather/ 308
+@weather_read {
+    method GET
+    path /weather/ /weather/index.html /weather/app.js /weather/style.css /weather/icon.svg /weather/manifest.webmanifest /weather/api/dashboard /weather/api/history /weather/login /weather/login.css /weather/login.js /weather/api/auth/status
+}
+handle @weather_read {
+    uri strip_prefix /weather
+    reverse_proxy weather-dashboard:8765 {
+        transport http {
+            dial_timeout 3s
+            response_header_timeout 15s
+        }
+    }
+}
+@weather_auth_write {
+    method POST
+    path /weather/api/auth/login /weather/api/auth/logout /weather/api/auth/refresh
+}
+handle @weather_auth_write {
+    uri strip_prefix /weather
+    reverse_proxy weather-dashboard:8765 {
+        transport http {
+            dial_timeout 3s
+            response_header_timeout 15s
+        }
+    }
+}
+# Reject every other weather path/method, including health, ready and ingestion.
+@weather_other path /weather /weather/*
+handle @weather_other {
+    respond 404
+}

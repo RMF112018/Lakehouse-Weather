@@ -1,6 +1,6 @@
 # ADR-0001: Use WeeWX ecosystem rather than a custom weather backend
 
-- Status: Accepted
+- Status: Partially superseded by ADR-0002 for the 2026-10-23 multi-location PostgreSQL objective; RF commissioning requirements remain.
 - Date: 2026-09-09
 
 ## Context
