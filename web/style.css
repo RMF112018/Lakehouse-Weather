@@ -8,3 +8,5 @@
 .sensor-details{margin:0}.custom-fields input:focus-visible{outline:3px solid #b66123;outline-offset:3px}
 
 .hero-weather>div:first-child{min-width:0}.temperature.sensor-hero{font-size:32px;letter-spacing:-.6px;line-height:1.2;overflow-wrap:anywhere}.sensor-hero+.condition-label{font-size:15px}
+
+#transmitter-diagnostics { margin: 1rem 0; padding: 1rem; } #transmitter-diagnostics summary { cursor:pointer; font-weight:600; } .source-label { display:block; overflow-wrap:anywhere; } .sensor-reading p { overflow-wrap:anywhere; }

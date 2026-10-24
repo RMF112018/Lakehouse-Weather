@@ -45,6 +45,7 @@ def forecast_identity():
 def compose(image):
     values = {
         'WEATHER_IMAGE_ID': image,
+        'WEATHER_RF_JOURNAL_PATH': str(BASE / 'rf-journal'),
         'WEATHER_REGISTRY_PATH': str(BASE / 'config/stations.json'),
         'WEATHER_DATABASE_URL_PATH': str(BASE / 'secrets/database-url'),
         'WEATHER_INGEST_TOKEN_PATH': str(BASE / 'secrets/ingest-token'),

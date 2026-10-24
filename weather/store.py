@@ -8,6 +8,30 @@ from urllib.parse import urlparse, unquote
 from .domain import rain_intervals, utc
 
 
+class ObservationConflict(ValueError):
+    """Same source/sample time with different immutable event content."""
+
+
+def event_content(observation):
+    value = copy.deepcopy(observation)
+    for key in ('receiver_received_at_utc', 'ingest_received_at_utc'):
+        value.get('provenance', {}).pop(key, None)
+    return value
+
+
+def project(rows, metric_keys, now):
+    result = {}
+    for row in reversed(rows):
+        row = dict(row)
+        row['rain_known_mm'] = row.get('rain_interval_mm')
+        if utc(row['observed_at']) > now:
+            continue
+        for key in metric_keys:
+            if key not in result and (row.get(key) is not None or row.get('unavailable_reasons', {}).get(key) == 'transmitter_invalid_sentinel'):
+                result[key] = {'value':row.get(key), 'observed_at':row['observed_at'], 'provenance':row.get('provenance', {}), 'unavailable_reason':row.get('unavailable_reasons', {}).get(key)}
+    return result
+
+
 class MemoryStore:
     def __init__(self):
         self.rows, self.forecasts = {}, {}
@@ -21,6 +45,8 @@ class MemoryStore:
             rows = self.rows.setdefault(station_id, {})
             key = observation['observed_at']
             if key in rows:
+                if event_content(rows[key]) != event_content(observation):
+                    raise ObservationConflict('Conflicting RF observation')
                 return False
             rows[key] = copy.deepcopy(observation)
             return True
@@ -45,6 +71,13 @@ class MemoryStore:
         with self.lock:
             pieces = [(utc(row['observed_at']), summaries.single(row)) for row in self.rows.get(station_id, {}).values() if start <= utc(row['observed_at']) < end]
             return summaries.render(station_id, zone, start, end, max_points, metric, pieces, width)
+
+    def current_metrics(self, station_id, metric_keys, since, now):
+        with self.lock:
+            rows = sorted((r for r in self.rows.get(station_id,{}).values() if since <= utc(r['observed_at']) <= now), key=lambda r:r['observed_at'])
+            if len(rows) > 1000:
+                raise summaries.HistoryCapacityError('Current projection capacity exceeded')
+            return project(rain_intervals(rows), metric_keys, now)
 
     def get_forecast(self, location_id):
         with self.lock:
@@ -90,6 +123,32 @@ class PostgresStore:
 
     def sync_registry(self, locations):
         with self.connection() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext('weather.registry.identity.v1'))")
+            stored = conn.execute('SELECT id, location_id, metadata FROM weather.stations LIMIT 1001').fetchall()
+            old_locations = conn.execute('SELECT id, metadata FROM weather.locations LIMIT 1001').fetchall()
+            if len(stored) > 1000 or len(old_locations) > 1000:
+                raise ValueError('Registry census capacity exceeded')
+            proposed = {s['id']:(loc['id'],s) for loc in locations for s in loc['stations']}
+            identities = {(m.get('receiver_model'),str(m.get('sensor_id'))):sid for sid,lid,m in stored}
+            if len(identities) != len(stored):
+                raise ValueError('Stored receiver identities are ambiguous')
+            def memberships(locs):
+                return {sid:g['id'] for loc in locs for g in loc.get('physical_stations',[]) for sid in g['source_station_ids']}
+            old_groups = memberships([m for lid,m in old_locations])
+            new_groups = memberships(locations)
+            for sid,(lid,station) in proposed.items():
+                identity = (station['receiver_model'],str(station['sensor_id']))
+                if identity in identities and identities[identity] != sid:
+                    raise ValueError('Cannot reassign receiver identity')
+                for old_sid,old_lid,old in stored:
+                    if old_sid != sid:
+                        continue
+                    pending = (old.get('sensor_id') == 'PENDING_RF_COMMISSIONING' and old.get('ingest_enabled') is False and old.get('receiver_model') == station.get('receiver_model') and station.get('sensor_id') != 'PENDING_RF_COMMISSIONING')
+                    if pending:
+                        pending = not conn.execute('SELECT 1 FROM weather.observations WHERE station_id=%s LIMIT 1', (sid,)).fetchone()
+                    changed_identity = any(str(old.get(k)) != str(station.get(k)) for k in ('receiver_model','sensor_id'))
+                    if old_lid != lid or (changed_identity and not pending) or old_groups.get(sid) is not None and old_groups.get(sid) != new_groups.get(sid):
+                        raise ValueError('Cannot rebind existing source lineage')
             for location in locations:
                 data = {k: v for k, v in location.items() if k != 'stations'}
                 conn.execute('INSERT INTO weather.locations (id, metadata) VALUES (%s, %s::jsonb) ON CONFLICT (id) DO UPDATE SET metadata=EXCLUDED.metadata', (location['id'], json.dumps(data)))
@@ -105,6 +164,9 @@ class PostgresStore:
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 20261023))", (station_id,))
             inserted = conn.execute('INSERT INTO weather.observations (station_id, observed_at, measurements) VALUES (%s,%s,%s::jsonb) ON CONFLICT DO NOTHING RETURNING station_id', (station_id, observation['observed_at'], json.dumps(observation, allow_nan=False))).fetchone()
             if not inserted:
+                existing = conn.execute('SELECT measurements FROM weather.observations WHERE station_id=%s AND observed_at=%s', (station_id,observation['observed_at'])).fetchone()
+                if existing is None or event_content(existing[0]) != event_content(observation):
+                    raise ObservationConflict('Conflicting RF observation')
                 return False
             for width in summaries.WIDTHS:
                 at = summaries.bucket(utc(observation['observed_at']), width)
@@ -218,6 +280,14 @@ class PostgresStore:
                 return rain_intervals([row[0]])[-1]
             prior = conn.execute("SELECT jsonb_build_object('observed_at',measurements->'observed_at','rain_total_mm',measurements->'rain_total_mm') FROM weather.observations WHERE station_id=%s AND observed_at<%s AND observed_at>=%s AND measurements->>'rain_total_mm' IS NOT NULL ORDER BY observed_at DESC LIMIT 1",(station_id,row[1],row[1]-timedelta(seconds=900))).fetchone()
             return rain_intervals(([prior[0]] if prior else [])+[row[0]])[-1]
+
+    def current_metrics(self, station_id, metric_keys, since, now):
+        with self.connection() as conn:
+            conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            rows = conn.execute('SELECT measurements FROM weather.observations WHERE station_id=%s AND observed_at>=%s AND observed_at<=%s ORDER BY observed_at LIMIT 1001', (station_id,since,now)).fetchall()
+            if len(rows) > 1000:
+                raise summaries.HistoryCapacityError('Current projection capacity exceeded')
+            return project(rain_intervals([r[0] for r in rows]), metric_keys, now)
 
     def get_forecast(self, location_id):
         with self.connection() as conn:

@@ -57,12 +57,21 @@ def main():
     serve.add_argument('--host', default='127.0.0.1')
     serve.add_argument('--port', default=8765, type=int)
     commands.add_parser('refresh-forecasts')
+    collect = commands.add_parser('collect', help='Private durable allowlisted RF stdin collector')
+    collect.add_argument('--journal', default='/var/lib/weather-rf')
     setup = commands.add_parser('setup-password', help='Set owner password through hidden interactive TTY prompts')
     setup.add_argument('--email', required=True)
     forward = commands.add_parser('forward', help='Forward bounded rtl_433 JSON lines from stdin')
     forward.add_argument('--url', default='http://127.0.0.1:8765/api/ingest/rtl433')
     args = parser.parse_args()
     try:
+        if args.command == 'collect':
+            if os.environ.get('WEATHER_MODE') != 'postgres':
+                raise ValueError('Collector requires explicit PostgreSQL mode')
+            from .collector import run
+            locations = registry.load(os.environ['WEATHER_REGISTRY'])
+            run(sys.stdin.buffer, locations, args.journal, lambda: PostgresStore(secret_setting('WEATHER_DATABASE_URL'), os.environ.get('WEATHER_ALLOW_DATABASE')))
+            return 0
         if args.command == 'setup-password':
             import getpass
             if not sys.stdin.isatty() or not sys.stderr.isatty() or os.environ.get('WEATHER_MODE') != 'postgres':

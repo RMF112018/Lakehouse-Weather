@@ -85,6 +85,20 @@
     try { const response = await fetch(`./api/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' }, cache: 'no-store' }); if(response.status===401){location.replace('./login');throw new Error('Please sign in again.');} if (!response.ok) { let detail; try { const body = await response.json(); detail = typeof body.error === 'string' ? body.error.slice(0, 300) : null; } catch (_) {} if (detail === 'Local time is ambiguous or nonexistent; specify explicit UTC bounds') detail = 'This local time is ambiguous or does not exist because of daylight saving. Choose another local time.'; throw new Error(detail || `Weather service returned ${response.status}.`); } return await response.json(); }
     finally { clearTimeout(timeout); }
   }
+  function installations(location) {
+    const groups = location.physical_stations || [];
+    const grouped = new Set(groups.flatMap(group => group.sources.map(source => source.id)));
+    return [...groups.map(group => ({ ...group, physical: true, stale: group.status !== 'fresh', observation: { ...Object.fromEntries(Object.entries(group.metrics).map(([key, field]) => [key, field.value])), unavailable_reasons: Object.fromEntries(Object.entries(group.metrics).filter(([,field]) => field.unavailable_reason).map(([key,field]) => [key,field.unavailable_reason])) } })), ...(location.stations || []).filter(source => !grouped.has(source.id))];
+  }
+  function unavailableText(code) {
+    return {transmitter_invalid_sentinel:'Transmitter reports this field unavailable',never_seen_source:'No readings received from this transmitter',not_observed_in_window:'No recent reading for this field',not_observed:'Field not reported by this transmitter',out_of_projection_window:'Reading is outside the current window',clock_skew:'Receiver sample time is ahead'}[code] || (typeof code === 'string' && !code.includes('_') ? code : 'Field unavailable');
+  }
+  function fieldDetail(key) {
+    const field = state.station?.metrics?.[key];
+    if (!field) return '';
+    const freshness = field.value === null ? 'Missing' : (Date.now() - new Date(field.observed_at_utc).getTime()) / 1000 > field.freshness_seconds ? 'Stale' : 'Fresh';
+    return `${freshness} · ${field.source_model} · ${field.observed_at_utc || 'No sample time'}${field.observed_at_utc ? ` · ${age(field.observed_at_utc)}` : ''}${field.unavailable_reason ? ` · ${unavailableText(field.unavailable_reason)}` : ''}`;
+  }
   function message(text) { $('error').hidden = !text; set('error', text); }
   async function refresh() {
     $('refresh').disabled = true; $('main').setAttribute('aria-busy', 'true'); message('');
@@ -95,7 +109,7 @@
       if(signout)signout.hidden=data.mode==='demo';
       const previousStation = state.station?.id;
       state.location = data.locations.find(l => l.id === state.location?.id) || data.locations[0] || null;
-      state.station = state.location?.stations?.find(s => s.id === state.station?.id) || state.location?.stations?.[0] || null;
+      state.station = (state.location ? installations(state.location).find(s => s.id === state.station?.id) : null) || (state.location ? installations(state.location)[0] : null) || null;
       if (state.station?.id !== previousStation) selectStationMetric();
       state.request++; state.history = null;
       $('loading').hidden = true; $('content').hidden = !state.location;
@@ -111,8 +125,8 @@
   function renderLocations() {
     $('locations').replaceChildren(); set('place-count', `${state.data.locations.length} ${state.data.locations.length === 1 ? 'location' : 'locations'}`);
     for (const location of state.data.locations) {
-      const stations = location.stations || []; const first = stations[0]; const button = node('button', 'location-card'); button.type = 'button'; button.setAttribute('aria-pressed', String(location.id === state.location.id));
-      const text = node('span'); text.append(node('span', 'location-name', location.name), node('span', 'location-sub', `${stations.length} ${stations.length === 1 ? 'station' : 'stations'} · ${first ? first.stale ? 'Stale readings' : 'Reporting' : 'Not connected'}`));
+      const stations = installations(location); const first = stations[0]; const button = node('button', 'location-card'); button.type = 'button'; button.setAttribute('aria-pressed', String(location.id === state.location.id));
+      const text = node('span'); text.append(node('span', 'location-name', location.name), node('span', 'location-sub', `${stations.length} ${stations.length === 1 ? 'station' : 'stations'} · ${first ? first.physical ? `${first.status} source coverage` : first.stale ? 'Stale readings' : 'Reporting' : 'Not connected'}`));
       button.append(text, node('span', 'location-temp', `${temp(first?.observation?.temperature_c)}°`));
       button.addEventListener('click', () => { state.location = location; state.station = stations[0] || null; selectStationMetric(); state.history = null; state.request++; $('chart').classList.remove('loading-state'); render(); loadHistory(); }); $('locations').append(button);
     }
@@ -121,8 +135,28 @@
     $('fahrenheit').setAttribute('aria-pressed', String(state.unit === 'F')); $('celsius').setAttribute('aria-pressed', String(state.unit === 'C'));
     renderLocations();
     set('location-title', state.location.name); set('location-region', `${state.location.timezone || 'UTC'} · LOCAL OBSERVATIONS`);
-    const select = $('station-select'); select.replaceChildren(); for (const station of state.location.stations || []) { const option = node('option', '', station.name); option.value = station.id; option.selected = station.id === state.station?.id; select.append(option); } select.disabled = !state.station;
-    renderStationComparison(); renderConditions(); renderSensors(); renderMetricOptions(); renderChart(); renderForecast();
+    const select = $('station-select'); select.replaceChildren(); for (const station of installations(state.location)) { const option = node('option', '', station.name); option.value = station.id; option.selected = station.id === state.station?.id; select.append(option); } select.disabled = !state.station;
+    renderRFStatus(); renderTransmitters(); renderStationComparison(); renderConditions(); renderSensors(); renderMetricOptions(); renderChart(); renderForecast();
+  }
+  function renderRFStatus() {
+    const status = state.data.rf_status || {status:'unknown'};
+    const root = $('rf-status-details'); root.replaceChildren();
+    root.append(node('p','',status.status === 'available' ? 'Collector status available' : status.status === 'stale_status' ? 'Collector status is stale' : 'Collector status unavailable'));
+    const labels = {last_receipt_utc:'Last received',last_commit_utc:'Last database commit',accepted:'Accepted',rejected:'Rejected',duplicates:'Duplicate frames',conflicts:'Conflicts',pending_count:'Pending events',pending_bytes:'Pending bytes',oldest_pending_age_seconds:'Oldest pending age (seconds)'};
+    for (const [key,label] of Object.entries(labels)) if (status[key] !== undefined) root.append(node('p','',`${label}: ${status[key]}`));
+    if (status.error_code && status.error_code !== 'none') root.append(node('p','','Collector requires attention'));
+  }
+  function renderTransmitters() {
+    const disclosure = $('transmitter-diagnostics');
+    disclosure.hidden = !state.station?.physical;
+    $('transmitter-details').replaceChildren();
+    for (const source of state.station?.sources || []) {
+      const obs = source.observation || {};
+      const item = node('div', 'sensor-reading');
+      item.append(node('strong','',source.name),node('p','',`${source.model} · ${source.last_seen || 'No sample'} · ${source.last_seen ? age(source.last_seen) : 'Missing'} · Battery ${obs.battery_ok === true ? 'OK' : obs.battery_ok === false ? 'low' : 'unknown'}`));
+      for (const [key,reason] of Object.entries(obs.unavailable_reasons || {})) if (reason === 'transmitter_invalid_sentinel') item.append(node('p','',`${key}: transmitter reports invalid`));
+      $('transmitter-details').append(item);
+    }
   }
   function chooseStation(station) {
     state.station = station; selectStationMetric(); state.history = null; state.request++;
@@ -130,7 +164,7 @@
     render(); loadHistory();
   }
   function renderStationComparison() {
-    const stations = state.location.stations || []; const root = $('station-comparison'); root.replaceChildren(); root.hidden = stations.length < 2;
+    const stations = installations(state.location); const root = $('station-comparison'); root.replaceChildren(); root.hidden = stations.length < 2;
     for (const station of stations) {
       const button = node('button', 'station-chip'); button.type = 'button'; button.setAttribute('aria-pressed', String(station.id === state.station?.id));
       button.append(node('span', '', station.name), node('strong', '', `${temp(station.observation?.temperature_c)}°`), node('small', '', station.stale ? 'Stale' : 'Reporting'));
@@ -140,7 +174,7 @@
   function metric(title, value, unit, detail, image) { const card = node('article', 'metric-card'); const top = node('div', 'metric-top'); top.append(node('span', '', title), icon(image)); const reading = node('div', 'metric-value', value); reading.append(node('small', '', unit)); card.append(top, reading, node('div', 'metric-detail', detail)); return card; }
   function renderConditions() {
     const station = state.station; const obs = station?.observation || {}; const forecast = state.location.forecast;
-    set('updated', obs.observed_at ? `Observed ${formatDate(obs.observed_at, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · ${age(obs.observed_at)}` : 'Waiting for the first observation');
+    set('updated', station?.physical ? 'Each field shows its source and sample time' : obs.observed_at ? `Observed ${formatDate(obs.observed_at, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · ${age(obs.observed_at)}` : 'Waiting for the first observation');
     const sensors = currentSensors(); let heroSensor; const hasTemperature = finite(obs.temperature_c);
     $('temperature').classList.toggle('sensor-hero', !hasTemperature);
     if (hasTemperature) { const temperature = node('span', '', temp(obs.temperature_c)); temperature.append(node('small', '', `°${state.unit}`)); $('temperature').replaceChildren(temperature); }
@@ -149,17 +183,17 @@
       heroSensor = sensors.find(item => item.key === key);
       set('temperature', heroSensor ? sensorValue(obs[key], heroSensor) : 'No readings');
     }
-    const today = forecast?.daily?.find(day => day.date === localCalendarDate(state.location.timezone));
-    const currentWeather = weather(today?.weather_code);
+    const currentWeather = weather(null);
     set('condition-label', hasTemperature ? 'Latest temperature' : heroSensor ? heroSensor.label : 'Awaiting station data');
-    set('hero-detail', hasTemperature && today ? `Today’s forecast: ${currentWeather.label.toLowerCase()}` : sensors.length ? `${hasTemperature ? 'Reported by' : station?.stale ? 'Latest sensor report ·' : 'Live sensor data ·'} ${station?.model || 'your station'}` : 'Local measurements from your weather station');
+    set('hero-detail', station?.physical ? fieldDetail('temperature_c') || `Installation status: ${station.status}` : sensors.length ? `${hasTemperature ? 'Reported by' : station?.stale ? 'Latest sensor report ·' : 'Live sensor data ·'} ${station?.model || 'your station'}` : 'Local measurements from your weather station');
     $('hero-icon').replaceChildren(icon(hasTemperature ? currentWeather.icon : 'gauge'));
-    set('station-health', !station ? 'No station' : station.stale ? '● Stale reading' : '● Station reporting'); $('station-health').classList.toggle('stale', !station || station.stale);
+    if (station?.physical) { const values = Object.values(station.metrics); station.stale = values.some(field => field.value === null || !field.observed_at_utc || (Date.now()-new Date(field.observed_at_utc).getTime())/1000 > field.freshness_seconds); }
+    set('station-health', !station ? 'No station' : station.physical ? station.stale ? '● Partial or stale source coverage' : '● All measured fields fresh' : station.stale ? '● Stale reading' : '● Station reporting'); $('station-health').classList.toggle('stale', !station || station.stale);
     set('station-model', station ? `${station.model || 'Weather station'} · ${station.name}` : 'No station configured');
-    set('battery', obs.battery_ok === false ? 'Battery low' : obs.battery_ok === true ? 'Battery healthy' : finite(obs.battery_level) ? `Decoder battery level ${number(obs.battery_level, 2)}` : 'Battery status unknown');
+    set('battery', station?.physical ? 'Battery status in transmitter diagnostics' : obs.battery_ok === false ? 'Battery low' : obs.battery_ok === true ? 'Battery healthy' : finite(obs.battery_level) ? `Decoder battery level ${number(obs.battery_level, 2)}` : 'Battery status unknown');
     const priorities = ['humidity_pct', 'wind_speed_ms', 'rain_interval_mm', 'rain_total_mm', 'pressure_hpa', 'wind_gust_ms'];
     const featured = sensors.filter(sensor => sensor.key !== 'temperature_c' || sensors.length === 1).sort((a, b) => { const rank = key => priorities.includes(key) ? priorities.indexOf(key) : 99; return rank(a.key) - rank(b.key); }).slice(0, 4);
-    $('metrics').replaceChildren(...featured.map(sensor => metric(sensor.label, sensorValue(obs[sensor.key], sensor, false), unitFor(sensor), description(sensor), sensor.key.includes('wind') ? 'wind' : sensor.key.includes('rain') ? 'rain' : sensor.key.includes('humidity') ? 'drop' : 'gauge')));
+    $('metrics').replaceChildren(...featured.map(sensor => metric(sensor.label, sensorValue(obs[sensor.key], sensor, false), unitFor(sensor), fieldDetail(sensor.key) || description(sensor), sensor.key.includes('wind') ? 'wind' : sensor.key.includes('rain') ? 'rain' : sensor.key.includes('humidity') ? 'drop' : 'gauge')));
     if (!featured.length) $('metrics').append(node('p', 'empty', 'Sensor readings will appear after your first station transmission.'));
   }
   function catalog() {
@@ -180,11 +214,11 @@
   function renderSensors() {
     const obs = state.station?.observation || {};
     const sensors = [...currentSensors(), ...catalog().filter(sensor => (obs[sensor.key] === null || obs[sensor.key] === undefined) && obs.unavailable_reasons?.[sensor.key])];
-    set('sensor-count', `${sensors.length} reported fields`); $('sensor-details').replaceChildren();
+    set('sensor-count', `${sensors.length} ${state.station?.physical ? 'installation fields' : 'reported fields'}`); $('sensor-details').replaceChildren();
     for (const sensor of sensors) {
       const group = node('div', 'sensor-reading'); const value = node('dd', '', sensorValue(obs[sensor.key], sensor, false));
       if (unitFor(sensor)) value.append(node('small', '', unitFor(sensor)));
-      group.append(node('dt', '', sensor.label), value, node('p', '', `${obs.unavailable_reasons?.[sensor.key] ? `${obs.unavailable_reasons[sensor.key]}. ` : ''}${semanticNote(sensor)}${sensor.source_field ? ` Source: ${sensor.source_field}.` : ''}`)); $('sensor-details').append(group);
+      group.append(node('dt', '', sensor.label), value, node('p', '', `${fieldDetail(sensor.key) ? `${fieldDetail(sensor.key)}. ` : ''}${obs.unavailable_reasons?.[sensor.key] ? `${unavailableText(obs.unavailable_reasons[sensor.key])}. ` : ''}${semanticNote(sensor)}${sensor.source_field ? ` Source: ${sensor.source_field}.` : ''}`)); $('sensor-details').append(group);
     }
     if (!sensors.length) $('sensor-details').append(node('p', 'empty', 'No sensor measurements have been received yet.'));
     const known = new Set(catalog().map(sensor => sensor.source_field)); const extras = obs.raw_rf && typeof obs.raw_rf === 'object' && !Array.isArray(obs.raw_rf) ? Object.entries(obs.raw_rf) : [];
@@ -203,7 +237,7 @@
   }
   function renderMetricOptions() {
     const available = new Set(currentSensors().map(sensor => sensor.key));
-    const sensors = catalog();
+    const sensors = catalog().filter(sensor => !state.station?.physical || state.station.metrics[sensor.key]);
     if (!sensors.some(sensor => sensor.key === state.metric)) state.metric = sensors.find(sensor => sensor.kind !== 'status')?.key || sensors[0]?.key || '';
     $('metric-select').replaceChildren();
     for (const sensor of sensors) { const option = node('option', '', `${sensor.label}${sensor.kind === 'status' ? ' · status' : ''}${available.has(sensor.key) ? '' : ' (no latest reading)'}`); option.value = sensor.key; option.selected = sensor.key === state.metric; $('metric-select').append(option); }
@@ -230,14 +264,14 @@
     historyError(''); $('chart').classList.remove('loading-state'); $('chart').setAttribute('aria-busy', 'false');
     if (!state.station || !state.metric) { state.history = null; renderChart(); return; }
     if (state.range === 'custom' && (!$('history-start').value || !$('history-end').value)) { state.history = null; renderChart(); return; }
-    const params = new URLSearchParams({ station_id: state.station.id, range: state.range, metric: state.metric, max_points: '600' });
+    const params = new URLSearchParams({ [state.station.physical ? 'physical_station_id' : 'station_id']: state.station.id, range: state.range, metric: state.metric, max_points: '600' });
     if (state.range === 'custom') { params.set('local_start', $('history-start').value); params.set('local_end', $('history-end').value); params.set('timezone', state.location.timezone || 'UTC'); }
     state.history = null; historyError(''); renderChart(); $('chart').classList.add('loading-state'); $('chart').setAttribute('aria-busy', 'true'); set('chart-readout', 'Loading history…');
     try {
       const response = await api(`history?${params}`);
       if (request !== state.request) return;
       if (!Array.isArray(response.points)) throw new Error('The weather service returned an unexpected history response.');
-      state.history = response; renderChart();
+      state.history = response; renderChart(); if (state.station.physical) set('history-source', `Source: ${response.resolved_source_station_id}`);
     } catch (error) { if (request === state.request) { state.history = null; renderChart(); historyError(`${error.name === 'AbortError' ? 'History took too long to load.' : error.message} Change the range or refresh to try again.`); } }
     finally { if (request === state.request) { $('chart').classList.remove('loading-state'); $('chart').setAttribute('aria-busy', 'false'); } }
   }
@@ -310,11 +344,12 @@
     for (const day of forecast.daily.slice(0, 7)) { const cell = node('article', 'forecast-day'); const description = weather(day.weather_code); const date = `${day.date}T12:00:00Z`; const image = icon(description.icon); const descriptionNode = document.createElementNS('http://www.w3.org/2000/svg', 'title'); descriptionNode.textContent = description.label; image.prepend(descriptionNode); image.removeAttribute('aria-hidden'); image.setAttribute('role', 'img'); image.setAttribute('aria-label', description.label); const temperatures = node('div', 'forecast-temps', `${temp(day.temperature_max_c)}°`); temperatures.append(node('span', '', `${temp(day.temperature_min_c)}°`)); cell.append(node('span', 'day', day.date === today ? 'Today' : formatDate(date, { weekday: 'short' }, 'UTC')), node('span', 'date', formatDate(date, { month: 'short', day: 'numeric' }, 'UTC')), image, temperatures, node('span', 'rain-chance', `${number(day.precipitation_probability_pct)}% rain`)); $('forecast').append(cell); }
   }
   $('refresh').addEventListener('click', refresh);
-  $('station-select').addEventListener('change', event => { chooseStation(state.location.stations.find(s => String(s.id) === event.target.value)); });
+  $('station-select').addEventListener('change', event => { chooseStation(installations(state.location).find(s => String(s.id) === event.target.value)); });
   for (const [id, unit] of [['fahrenheit', 'F'], ['celsius', 'C']]) $(id).addEventListener('click', () => { state.unit = unit; try { localStorage.setItem('weatherhouse-unit', unit); } catch (_) {} if (state.location) render(); });
   $('range-select').addEventListener('change', event => { state.range = event.target.value; state.history = null; state.request++; historyError(''); renderMetricOptions(); renderChart(); loadHistory(); });
   $('custom-range').addEventListener('submit', event => { event.preventDefault(); if ($('history-start').value >= $('history-end').value) { historyError('The end must be later than the start.'); return; } loadHistory(); });
   $('metric-select').addEventListener('change', event => { state.metric = event.target.value; state.history = null; loadHistory(); });
   let resizeTimer; window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.location) renderChart(); }, 120); });
+  setInterval(() => { if (state.location) { renderConditions(); renderSensors(); renderTransmitters(); } }, 30000);
   refresh();
 })();

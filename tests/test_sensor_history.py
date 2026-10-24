@@ -107,13 +107,15 @@ class PostgresHistoryTests(unittest.TestCase):
         import uuid
         self.store=PostgresStore('postgresql://weather_runtime@127.0.0.1:55439/my_pa','nonproduction')
         self.sid='history-'+uuid.uuid4().hex[:12]
-        locations=[{'id':self.sid,'name':'Synthetic only','timezone':'America/New_York','latitude':0,'longitude':0,'stations':[{'id':self.sid,'name':'Synthetic','model':'Synthetic','receiver_model':'DEMO','sensor_id':1}]}]
+        locations=[{'id':self.sid,'name':'Synthetic only','timezone':'America/New_York','latitude':0,'longitude':0,'stations':[{'id':self.sid,'name':'Synthetic','model':'Synthetic','receiver_model':'DEMO','sensor_id':self.sid}]}]
         self.store.sync_registry(locations)
 
     def test_late_duplicates_exact_custom_edges_durable_and_backfill(self):
         for minute,value in [(4,24),(0,20),(2,22),(1,21),(3,23)]:
             self.assertTrue(self.store.insert(self.sid,reading(NOW+timedelta(minutes=minute),temperature_C=value,strike_count=minute)))
-        self.assertFalse(self.store.insert(self.sid,reading(NOW+timedelta(minutes=1),temperature_C=30)))
+        from weather.store import ObservationConflict
+        with self.assertRaises(ObservationConflict):
+            self.store.insert(self.sid,reading(NOW+timedelta(minutes=1),temperature_C=30))
         result=self.store.history_summary(self.sid,NOW+timedelta(minutes=1),NOW+timedelta(minutes=3),800,'temperature_c')
         self.assertEqual(result['total_observations'],2)
         self.assertEqual(result['summary']['metrics']['temperature_c']['mean'],21.5)

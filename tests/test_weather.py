@@ -13,7 +13,7 @@ from weather import demo, forecast
 from weather.domain import normalize, stamp
 from weather.registry import resolve, validate_registry
 from weather.server import Application, Server, handler
-from weather.store import MemoryStore, PostgresStore
+from weather.store import MemoryStore, PostgresStore, ObservationConflict
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -23,7 +23,9 @@ def packet(minutes=0, rain=10, **extra):
 def persistence_checks(test, store, sid, other):
     test.assertTrue(store.insert(sid, normalize(packet(-3, 10))))
     test.assertTrue(store.insert(sid, normalize(packet(-1, 13))))
-    test.assertFalse(store.insert(sid, normalize(packet(-1, 99))))
+    test.assertFalse(store.insert(sid, normalize(packet(-1, 13))))
+    with test.assertRaises(ObservationConflict):
+        store.insert(sid, normalize(packet(-1, 99)))
     store.insert(sid, normalize(packet(-2, 11)))
     test.assertEqual(store.latest(sid)['rain_interval_mm'], 2)
     test.assertEqual(store.history(sid, NOW-timedelta(minutes=1))[0]['rain_interval_mm'], 2)
@@ -157,6 +159,7 @@ class PostgresIntegrationTests(unittest.TestCase):
             location['id'] += suffix
             for station in location['stations']:
                 station['id'] += suffix
+                station['sensor_id'] = str(station['sensor_id']) + suffix
         store.sync_registry(locations)
         sid = locations[0]['stations'][0]['id']
         persistence_checks(self, store, sid, locations[1]['stations'][0]['id'])
